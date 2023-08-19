@@ -30,3 +30,11 @@
 *.exe
 *.out
 *.app
+
+# TRENDSETTER
+
+*.DS_Store
+*.swp
+*.xml
+
+Makefile
