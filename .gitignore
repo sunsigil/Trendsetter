@@ -35,6 +35,6 @@
 
 *.DS_Store
 *.swp
-*.xml
 
-Makefile
+./.xml
+./makefile
