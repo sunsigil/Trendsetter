@@ -45,6 +45,23 @@ class Doc
 			return token.substr(start, end-start+1);
 		}
 
+		void tree2doc_re(Node* node, int level)
+		{
+			for(int i = 0; i < level; i++)
+			{ text += '\t'; }
+			if(node->children.size() != 0)
+			{
+				text += "<" + node->data + ">\n";
+				for(int i = 0; i < node->children.size(); i++)
+				{ tree2doc_re(node->children[i], level+1); }
+				for(int i = 0; i < level; i++)
+				{ text += '\t'; }
+				text += "</" + node->data + ">\n";
+			}
+			else
+			{ text += node->data + "\n"; }
+		}
+
 	public:
 		int count()
 		{
@@ -119,8 +136,8 @@ class Doc
 
 			return tokens;
 		}
-
-		Node* sprout()
+		
+		Node* parse()
 		{
 			std::vector<std::string> tokens = tokenize();
 			std::vector<Node*> tree = std::vector<Node*>();
@@ -129,27 +146,33 @@ class Doc
 			{
 				std::string token = tokens[i];
 				std::string payload = token.substr(2, token.size()-2);
-				Node* node;
+				Node* node = new Node(payload);
 
 				switch(token[0])
 				{
 					case 's':
-						node = new Node(payload);
 						if(tree.size() > 0)
-						{ tree.back()->add_child(node); }
+						{ tree.back()->children.push_back(node); }
 						tree.push_back(node);
 					break;
 					case 'e':
+						delete node;
 						tree.pop_back();
 					break;
 					case 'c':
-						node = new Node(payload);
-						tree.back()->add_child(node);
+						tree.back()->children.push_back(node);
 					break;
 				}
 			}
 			
 			return tree.front();
+		}
+
+		void write(std::string path)
+		{
+			std::ofstream file = std::ofstream(path);
+			file << text;
+			file.close();
 		}
 
 		Doc(std::string path)
@@ -159,6 +182,10 @@ class Doc
 			buffer << file.rdbuf();
 			text = buffer.str();
 			file.close();
+		}
+		Doc(Node* tree)
+		{
+			tree2doc_re(tree, 0);
 		}
 };
 

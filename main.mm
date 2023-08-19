@@ -26,12 +26,12 @@ static void glfw_error_callback(int error, const char* description)
 
 void draw_tree(Node* node)
 {
-	if(node->child_count() > 0)
+	if(node->children.size() > 0)
 	{
-		if(ImGui::TreeNode(node->get_data().c_str()))
+		if(ImGui::TreeNode(node->data.c_str()))
 		{
-			for(int i = 0; i < node->child_count(); i++)
-			{ draw_tree(node->get_child(i)); }
+			for(int i = 0; i < node->children.size(); i++)
+			{ draw_tree(node->children[i]); }
 			ImGui::TreePop();
 		}
 	}
@@ -47,13 +47,14 @@ int main(int argc, char** argv)
 		return 1;
 	}
 	std::string path = argv[1];
-	Doc doc = Doc(path);
-	if(!doc.validate())
+
+	Doc rd_doc = Doc(path);
+	if(!rd_doc.validate())
 	{
 		std::cerr << "error: document does not contain valid XML" << std::endl;
 		return 1;
 	}
-	Node* tree = doc.sprout();
+	Node* tree = rd_doc.parse();
 
     // Initialize IMGUI
     IMGUI_CHECKVERSION();
@@ -169,7 +170,8 @@ int main(int argc, char** argv)
     }
 
     // Cleanup
-	tree->serialize(path);
+	Doc wr_doc = Doc(tree);
+	wr_doc.write(path);
 	delete tree;
 
     ImGui_ImplMetal_Shutdown();
