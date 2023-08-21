@@ -24,19 +24,67 @@ static void glfw_error_callback(int error, const char* description)
     fprintf(stderr, "<!> [GLFW] %d: %s\n", error, description);
 }
 
+std::string node_popup_data;
+void draw_node_popup(Node* node, bool terminal)
+{
+	ImGui::InputText("Data", &node_popup_data);
+
+	if(ImGui::Button("Confirm"))
+	{
+		Node* add = new Node(node_popup_data, terminal);
+		std::cerr << &node_popup_data << " " << terminal << " " << &(add->data) << std::endl;
+		node->children.push_back(add);
+		ImGui::CloseCurrentPopup();
+	}
+
+	ImGui::SameLine();
+	if(ImGui::Button("Cancel"))
+	{ ImGui::CloseCurrentPopup(); }
+}
+
 void draw_tree(Node* node)
 {
-	if(node->children.size() > 0)
-	{
+	if(!node->terminal)
+	{	
+		ImGui::PushID(node);
 		if(ImGui::TreeNode(node->data.c_str()))
-		{
+		{	
 			for(int i = 0; i < node->children.size(); i++)
 			{ draw_tree(node->children[i]); }
+			
+			if(ImGui::Button("Add Node"))
+			{ ImGui::OpenPopup("Add Node"); }
+			if(ImGui::BeginPopupModal("Add Node"))
+			{
+				draw_node_popup(node, false);
+				ImGui::EndPopup();
+			}
+
+			if
+			(
+				node->children.size() == 0 ||
+				!node->children.back()->terminal
+			)
+			{
+				if(ImGui::Button("Add Content"))
+				{ ImGui::OpenPopup("Add Content"); }
+				if(ImGui::BeginPopupModal("Add Content"))
+				{
+					draw_node_popup(node, true);
+					ImGui::EndPopup();
+				}
+			}
+
 			ImGui::TreePop();
 		}
+		ImGui::PopID();
 	}
 	else
-	{ ImGui::InputText("Value", &node->data); }
+	{
+		ImGui::PushID(node);
+		ImGui::InputText("Content", &node->data);
+		ImGui::PopID();
+	}
 }
 
 int main(int argc, char** argv)

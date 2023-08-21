@@ -12,18 +12,25 @@ class Node
 
 	public:
 		std::string data;
+		bool terminal;
 		std::vector<Node*> children;
 
-		Node(std::string data)
+		bool is_terminated()
+		{
+			for(int i = 0; i < children.size(); i++)
+			{
+				if(children[i]->terminal)
+				{ return true; }
+			}
+			return false;
+		}
+
+		Node(std::string data, bool terminal)
 		{
 			this->data = data;
+			this->terminal = terminal;
 			children = std::vector<Node*>();
 		}
-		Node(std::string data, std::vector<Node*> children)
-		{
-			this->data = data;
-			this->children = children;
-		}	
 
 		~Node()
 		{ delete_re(); }

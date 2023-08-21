@@ -3,6 +3,7 @@
 #include <fstream>
 #include <sstream>
 #include <iostream>
+#include <cctype>
 
 class Doc
 {
@@ -38,10 +39,17 @@ class Doc
 
 		std::string clean_token(std::string token)
 		{
-			int start = token.find_first_not_of(" \t\n\0");
-			int end = token.find_last_not_of(" \t\n");
-			if(start == -1 || end == -1)
-			{ return ""; }
+			int start, end;
+			for(start = 0; start < token.size(); start++)
+			{
+				if(!isspace(token[start]))
+				{ break; }
+			}
+			for(end = token.size()-1; end >= start; end--)
+			{
+				if(!isspace(token[end]))
+				{ break; }
+			}
 			return token.substr(start, end-start+1);
 		}
 
@@ -49,7 +57,7 @@ class Doc
 		{
 			for(int i = 0; i < level; i++)
 			{ text += '\t'; }
-			if(node->children.size() != 0)
+			if(!node->terminal)
 			{
 				text += "<" + node->data + ">\n";
 				for(int i = 0; i < node->children.size(); i++)
@@ -101,36 +109,36 @@ class Doc
 		std::vector<std::string> tokenize()
 		{
 			std::vector<std::string> tokens = std::vector<std::string>();
+			enum Mode { TAG, CONTENT } state = CONTENT;
+			std::string token = "";
 			
-			int tag_count = count();
-			int tag_idx = 0;
-			int i = 0;
-
-			while(i < text.size() && tag_idx < tag_count)
+			for(int idx = 0; idx < text.size(); idx++)
 			{
-				if(is_tag(i))
+				switch(state)
 				{
-					std::string tag = clean_token(read_tag(i));
-					if(tag[0] == '/')
-					{ tokens.push_back("e:"+tag.substr(1, tag.size()-1)); }
-					else
-					{ tokens.push_back("s:"+tag); } 
+					case TAG:
+						if(text[idx] == '>')
+						{
+							tokens.push_back("t:"+token);
+							token = "";
+							state = CONTENT;
+						}
+						else
+						{ token += text[idx]; }
+					break;
 
-					tag_idx += 1;
-					i += tag.size()+2;
-				}
-				else
-				{
-					std::string content = "";
-					while(!is_tag(i))
-					{
-						content += text[i];
-						i += 1;
-					}
-					content = clean_token(content);
-
-					if(content.size() > 0)
-					{ tokens.push_back("c:"+content); }
+					case CONTENT:
+						if(text[idx] == '<')
+						{
+							token = clean_token(token);
+							if(token.size() > 0)
+							{ tokens.push_back("c:"+token); }
+							token = "";
+							state = TAG;
+						}
+						else
+						{ token += text[idx]; }
+					break;
 				}
 			}
 
@@ -141,25 +149,29 @@ class Doc
 		{
 			std::vector<std::string> tokens = tokenize();
 			std::vector<Node*> tree = std::vector<Node*>();
-
+			
 			for(int i = 0; i < tokens.size(); i++)
 			{
-				std::string token = tokens[i];
-				std::string payload = token.substr(2, token.size()-2);
-				Node* node = new Node(payload);
+				std::string prefix = tokens[i].substr(0,2);
+				std::string payload = tokens[i].substr(2);
+				Node* node;
 
-				switch(token[0])
+				switch(prefix[0])
 				{
-					case 's':
-						if(tree.size() > 0)
-						{ tree.back()->children.push_back(node); }
-						tree.push_back(node);
+					case 't':
+						if(payload[0] == '/')
+						{ tree.pop_back(); }
+						else
+						{
+							node = new Node(payload, false);
+							if(tree.size() > 0)
+							{ tree.back()->children.push_back(node); }
+							tree.push_back(node);
+						}
 					break;
-					case 'e':
-						delete node;
-						tree.pop_back();
-					break;
+
 					case 'c':
+						node = new Node(payload, true);
 						tree.back()->children.push_back(node);
 					break;
 				}
