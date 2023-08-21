@@ -149,6 +149,7 @@ class Doc
 		{
 			std::vector<std::string> tokens = tokenize();
 			std::vector<Node*> tree = std::vector<Node*>();
+			Node* root = nullptr;
 			
 			for(int i = 0; i < tokens.size(); i++)
 			{
@@ -160,7 +161,10 @@ class Doc
 				{
 					case 't':
 						if(payload[0] == '/')
-						{ tree.pop_back(); }
+						{
+							root = tree.back();
+							tree.pop_back();
+						}
 						else
 						{
 							node = new Node(payload, false);
@@ -177,7 +181,7 @@ class Doc
 				}
 			}
 			
-			return tree.front();
+			return root;
 		}
 
 		void write(std::string path)
@@ -196,8 +200,6 @@ class Doc
 			file.close();
 		}
 		Doc(Node* tree)
-		{
-			tree2doc_re(tree, 0);
-		}
+		{ tree2doc_re(tree, 0); }
 };
 

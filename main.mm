@@ -32,7 +32,6 @@ void draw_node_popup(Node* node, bool terminal)
 	if(ImGui::Button("Confirm"))
 	{
 		Node* add = new Node(node_popup_data, terminal);
-		std::cerr << &node_popup_data << " " << terminal << " " << &(add->data) << std::endl;
 		node->children.push_back(add);
 		ImGui::CloseCurrentPopup();
 	}
@@ -96,14 +95,6 @@ int main(int argc, char** argv)
 	}
 	std::string path = argv[1];
 
-	Doc rd_doc = Doc(path);
-	if(!rd_doc.validate())
-	{
-		std::cerr << "error: document does not contain valid XML" << std::endl;
-		return 1;
-	}
-	Node* tree = rd_doc.parse();
-
     // Initialize IMGUI
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
@@ -165,6 +156,15 @@ int main(int argc, char** argv)
     nswin.contentView.wantsLayer = YES;
 
     MTLRenderPassDescriptor *renderPassDescriptor = [MTLRenderPassDescriptor new];
+	
+	Doc rd_doc = Doc(path);
+	if(!rd_doc.validate())
+	{
+		std::cerr << "error: document does not contain valid XML" << std::endl;
+		return 1;
+	}
+	Node* tree = rd_doc.parse();
+	if(tree == nullptr){ std::cerr << "Empty!" << std::endl; }
 
     // Main loop
     while (!glfwWindowShouldClose(window))
@@ -202,7 +202,22 @@ int main(int argc, char** argv)
 
 			// Compose test window
             ImGui::Begin(path.c_str(), nullptr, flags);
-			draw_tree(tree);
+			if(tree == nullptr)
+			{
+				ImGui::OpenPopup("Empty Document");
+				if(ImGui::BeginPopupModal("Empty Document"))
+				{
+					ImGui::Text("This document is empty!");
+					if(ImGui::Button("Add root node"))
+					{
+						tree = new Node("root", false);
+						ImGui::CloseCurrentPopup();
+					}
+					ImGui::EndPopup();
+				}
+			}
+			else
+			{ draw_tree(tree); }
 			ImGui::End();
 
             // Render
