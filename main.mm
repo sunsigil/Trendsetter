@@ -2,6 +2,9 @@
 
 #include <stdio.h>
 #include <iostream>
+#include <filesystem>
+#include <fstream>
+#include <map>
 
 #import <Metal/Metal.h>
 #import <QuartzCore/QuartzCore.h>
@@ -19,61 +22,134 @@
 #include "tree.h"
 #include "doc.h"
 
+namespace fsys = std::filesystem;
+
+struct Asset
+{
+	std::string path;
+	Doc doc;
+	Node* tree;
+};
+
+struct Globals
+{
+	std::vector<std::string> traits;
+};
+Globals globals;
+
 static void glfw_error_callback(int error, const char* description)
 {
     fprintf(stderr, "<!> [GLFW] %d: %s\n", error, description);
 }
 
-std::string node_popup_data;
-void draw_node_popup(Node* node, bool terminal)
+Globals load_globals(fsys::path path)
 {
-	ImGui::InputText("Data", &node_popup_data);
-
-	if(ImGui::Button("Confirm"))
+	fsys::path traits_path = path/"traits.csv";
+	if(!fsys::exists(traits_path))
 	{
-		Node* add = new Node(node_popup_data, terminal);
-		node->children.push_back(add);
-		ImGui::CloseCurrentPopup();
+		std::ofstream file = std::ofstream(traits_path);
+		file.close();
 	}
 
-	ImGui::SameLine();
-	if(ImGui::Button("Cancel"))
-	{ ImGui::CloseCurrentPopup(); }
+	std::ifstream file = std::ifstream(traits_path);
+	std::stringstream traits_buffer;
+	traits_buffer << file.rdbuf();
+	std::string traits_text = traits_buffer.str();
+	file.close();
+
+	std::vector<std::string> traits = std::vector<std::string>();
+	int trait_start = 0;
+	for(int i = 0; i < traits_text.size(); i++)
+	{
+		if(traits_text[i] == ',' || traits_text[i] == '\n')
+		{
+			traits.push_back(traits_text.substr(trait_start, i));
+			trait_start = i+1;
+		}
+	}
+
+	return {traits};
 }
 
-void draw_tree(Node* node)
+void draw_file_adder(fsys::path path)
 {
-	if(!node->terminal)
-	{	
+	static std::string add_name = "";
+	ImGui::InputText(path.c_str(), &add_name);
+	fsys::path add_path = path/add_name;
+
+	if(add_name.length() >= 3 || !fsys::exists(add_path))
+	{
+		if(ImGui::Button("Add##add_file_button"))
+		{
+			std::ofstream file = std::ofstream(add_path);
+			file.close();
+		}
+	}
+	else
+	{ ImGui::Text("Directory empty. Enter a valid file name to begin"); }
+}
+
+void draw_file_loader(fsys::path path, Asset& asset)
+{
+	static int select_idx = 0;
+
+	std::vector<fsys::path> entries = std::vector<fsys::path>();
+	for(fsys::path entry : fsys::directory_iterator(path))
+	{
+		if(fsys::is_regular_file(entry))
+		{ entries.push_back(entry); }
+	}
+
+	if(ImGui::BeginListBox(path.c_str()))
+	{
+		for(int i = 0; i < entries.size(); i++)
+		{
+			if(ImGui::Selectable(entries[i].c_str(), i == select_idx))
+			{ select_idx = i; }
+		}
+		ImGui::EndListBox();
+	}
+	std::string selection = entries[select_idx];
+
+	if(ImGui::Button("Load##load_tree_button"))
+	{
+		Doc doc = Doc(selection);
+		if(!doc.validate())
+		{
+			ImGui::OpenPopup("Error##invalid_doc_popup");
+			if(ImGui::BeginPopupModal("Error##invalid_doc_popup"))
+			{
+				ImGui::Text("Document does not contain valid XML");
+				ImGui::EndPopup();
+			}
+		}
+		else
+		{
+			Node* tree = doc.parse();
+			if(tree == nullptr)
+			{ tree = new Node("root", false); }
+			asset = {selection, doc, tree};
+		}
+	}
+}
+
+void draw_driver_editor(Node* node, int level)
+{
+	if(level == 0)
+	{
 		ImGui::PushID(node);
 		if(ImGui::TreeNode(node->data.c_str()))
 		{	
 			for(int i = 0; i < node->children.size(); i++)
-			{ draw_tree(node->children[i]); }
+			{ draw_driver_editor(node->children[i], level+1); }
 			
-			if(ImGui::Button("Add Node"))
-			{ ImGui::OpenPopup("Add Node"); }
-			if(ImGui::BeginPopupModal("Add Node"))
+			if(ImGui::Button("Add Weight"))
 			{
-				draw_node_popup(node, false);
-				ImGui::EndPopup();
+				Node* trait_node = new Node(globals.traits[0], false);
+				Node* weight_node = new Node("0", true);
+				trait_node->children.push_back(weight_node);
+				node->children.push_back(trait_node);
 			}
-
-			if
-			(
-				node->children.size() == 0 ||
-				!node->children.back()->terminal
-			)
-			{
-				if(ImGui::Button("Add Content"))
-				{ ImGui::OpenPopup("Add Content"); }
-				if(ImGui::BeginPopupModal("Add Content"))
-				{
-					draw_node_popup(node, true);
-					ImGui::EndPopup();
-				}
-			}
-
 			ImGui::TreePop();
 		}
 		ImGui::PopID();
@@ -81,7 +157,17 @@ void draw_tree(Node* node)
 	else
 	{
 		ImGui::PushID(node);
-		ImGui::InputText("Content", &node->data);
+		if(ImGui::BeginCombo("##driver_trait_input", node->data.c_str()))
+		{
+			for(std::string trait : globals.traits)
+			{
+				if(ImGui::Selectable(trait.c_str(), trait == node->data))
+				{ node->data = trait; }
+			}
+			ImGui::EndCombo();
+		}
+		ImGui::SameLine();
+		ImGui::InputText("##driver_weight_input", &node->children.back()->data);
 		ImGui::PopID();
 	}
 }
@@ -90,10 +176,33 @@ int main(int argc, char** argv)
 {
 	if(argc < 2)
 	{
-		std::cerr << "usage: edit <DOCUMENT>" << std::endl;
+		std::cerr << "usage: edit <WORKSPACE PATH>" << std::endl;
 		return 1;
 	}
-	std::string path = argv[1];
+	std::string workspace_pathname = argv[1];
+
+	fsys::path workspace_path = fsys::path(workspace_pathname);
+	if(!fsys::exists(workspace_path) || !fsys::is_directory(workspace_path))
+	{
+		std::cerr <<"error: workspace path does not point to existing directory" << std::endl;
+		return 1;
+	}
+
+	std::string sections[] = {"drivers", "items", "demographics", "packs", "globals"};
+	for(std::string section : sections)
+	{
+		fsys::path section_path = workspace_path/section;
+		if(!fsys::exists(section_path) || !fsys::is_directory(section_path))
+		{
+			std::cerr <<"error: workspace does not have requisite sections" << std::endl;
+			return 1;
+		}
+	}
+
+	int tab_idx = 0;
+	Asset default_asset = {"", Doc(""), nullptr}; 
+	Asset assets[] = {default_asset, default_asset, default_asset, default_asset, default_asset};
+	globals = load_globals(workspace_path/"globals");
 
     // Initialize IMGUI
     IMGUI_CHECKVERSION();
@@ -111,22 +220,6 @@ int main(int argc, char** argv)
 	ImGuiWindowFlags_NoSavedSettings |
 	ImGuiWindowFlags_NoCollapse |
 	ImGuiWindowFlags_NoTitleBar;
-
-    // Load Fonts
-    // - If no fonts are loaded, dear imgui will use the default font. You can also load multiple fonts and use ImGui::PushFont()/PopFont() to select them.
-    // - AddFontFromFileTTF() will return the ImFont* so you can store it if you need to select the font among multiple.
-    // - If the file cannot be loaded, the function will return a nullptr. Please handle those errors in your application (e.g. use an assertion, or display an error and quit).
-    // - The fonts will be rasterized at a given size (w/ oversampling) and stored into a texture when calling ImFontAtlas::Build()/GetTexDataAsXXXX(), which ImGui_ImplXXXX_NewFrame below will call.
-    // - Use '#define IMGUI_ENABLE_FREETYPE' in your imconfig file to use Freetype for higher quality font rendering.
-    // - Read 'docs/FONTS.md' for more instructions and details.
-    // - Remember that in C/C++ if you want to include a backslash \ in a string literal you need to write a double backslash \\ !
-    //io.Fonts->AddFontDefault();
-    //io.Fonts->AddFontFromFileTTF("c:\\Windows\\Fonts\\segoeui.ttf", 18.0f);
-    //io.Fonts->AddFontFromFileTTF("../../misc/fonts/DroidSans.ttf", 16.0f);
-    //io.Fonts->AddFontFromFileTTF("../../misc/fonts/Roboto-Medium.ttf", 16.0f);
-    //io.Fonts->AddFontFromFileTTF("../../misc/fonts/Cousine-Regular.ttf", 15.0f);
-    //ImFont* font = io.Fonts->AddFontFromFileTTF("c:\\Windows\\Fonts\\ArialUni.ttf", 18.0f, nullptr, io.Fonts->GetGlyphRangesJapanese());
-    //IM_ASSERT(font != nullptr);
 
     // Initialize GLFW
     glfwSetErrorCallback(glfw_error_callback);
@@ -157,15 +250,6 @@ int main(int argc, char** argv)
 
     MTLRenderPassDescriptor *renderPassDescriptor = [MTLRenderPassDescriptor new];
 	
-	Doc rd_doc = Doc(path);
-	if(!rd_doc.validate())
-	{
-		std::cerr << "error: document does not contain valid XML" << std::endl;
-		return 1;
-	}
-	Node* tree = rd_doc.parse();
-	if(tree == nullptr){ std::cerr << "Empty!" << std::endl; }
-
     // Main loop
     while (!glfwWindowShouldClose(window))
     {
@@ -201,23 +285,51 @@ int main(int argc, char** argv)
 			ImGui::SetNextWindowSize(ImVec2(width, height));
 
 			// Compose test window
-            ImGui::Begin(path.c_str(), nullptr, flags);
-			if(tree == nullptr)
+            ImGui::Begin(workspace_pathname.c_str(), nullptr, flags);
+			if(ImGui::BeginTabBar("Workspace Tabs", ImGuiTabBarFlags_None))
 			{
-				ImGui::OpenPopup("Empty Document");
-				if(ImGui::BeginPopupModal("Empty Document"))
+				int idx = 0;
+				for(std::string section : sections)
 				{
-					ImGui::Text("This document is empty!");
-					if(ImGui::Button("Add root node"))
+					if(ImGui::BeginTabItem(section.c_str()))
 					{
-						tree = new Node("root", false);
-						ImGui::CloseCurrentPopup();
+						tab_idx = idx;
+						ImGui::EndTabItem();
 					}
-					ImGui::EndPopup();
+					idx++;
 				}
+				ImGui::EndTabBar();
+			}
+			fsys::path section_path = workspace_path/sections[tab_idx];
+
+			if(assets[tab_idx].tree == nullptr)
+			{
+				size_t n_files = 0;
+				for(fsys::path entry : fsys::directory_iterator(section_path))
+				{
+					if(fsys::is_regular_file(entry))
+					{ n_files++; }
+				}
+
+				if(n_files > 0)
+				{ draw_file_loader(section_path, assets[tab_idx]); }
+				else
+				{ draw_file_adder(section_path); }
 			}
 			else
-			{ draw_tree(tree); }
+			{ 
+				ImGui::Text(assets[tab_idx].path.c_str());
+				ImGui::SameLine();
+				if(ImGui::Button("Save##asset_save_button"))
+				{
+					Doc doc = Doc(assets[tab_idx].tree);
+					doc.write(assets[tab_idx].path);
+				}
+				ImGui::Separator();
+
+				if(sections[tab_idx] == "drivers")
+				{ draw_driver_editor(assets[tab_idx].tree, 0); }
+			}
 			ImGui::End();
 
             // Render
@@ -232,10 +344,11 @@ int main(int argc, char** argv)
         }
     }
 
-    // Cleanup
-	Doc wr_doc = Doc(tree);
-	wr_doc.write(path);
-	delete tree;
+	for(Asset asset : assets)
+	{
+		if(asset.tree != nullptr)
+		{ delete asset.tree; }
+	}
 
     ImGui_ImplMetal_Shutdown();
     ImGui_ImplGlfw_Shutdown();
