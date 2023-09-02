@@ -6,15 +6,6 @@
 #include <iostream>
 #include <cctype>
 
-std::string CSVDoc::read(std::string path)
-{
-	std::ifstream file = std::ifstream(path);
-	std::stringstream buffer;
-	buffer << file.rdbuf();
-	file.close();
-	return buffer.str();
-}
-
 std::string CSVDoc::read(Node* graph)
 {
 	if(graph->children.size() > 0)
@@ -44,9 +35,6 @@ std::vector<std::string> CSVDoc::lex(std::string text)
 	return tokens;
 }
 
-bool CSVDoc::validate()
-{ return true; }
-
 Node* CSVDoc::graph()
 {
 	if(tokens.size() == 0)
@@ -71,27 +59,9 @@ Node* CSVDoc::graph()
 	return graph;
 }
 
-void CSVDoc::write(std::string path)
-{
-	std::ofstream file = std::ofstream(path);
-	file << text;
-	file.close();
-}
-
-std::string CSVDoc::dump()
-{
-	std::string out = text;
-	out += "---\n";
-	for(std::string token : tokens)
-	{ out += token + '\n'; }
-	out += "---\n";
-	out += read(graph());
-	return out;
-}
-		
 CSVDoc::CSVDoc(std::string path)
 {
-	text = read(path);
+	text = Doc::read(path);
 	tokens = lex(text);
 }
 

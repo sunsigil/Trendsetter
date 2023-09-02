@@ -49,16 +49,6 @@ std::string read_tag(std::string text, int i)
 	return text.substr(start, count);
 }
 
-
-std::string XMLDoc::read(std::string path)
-{
-	std::ifstream file = std::ifstream(path);
-	std::stringstream buffer;
-	buffer << file.rdbuf();
-	file.close();
-	return buffer.str();
-}
-
 std::string read_helper(Node* node, int level)
 {
 	std::string text = "";
@@ -83,9 +73,7 @@ std::string read_helper(Node* node, int level)
 }
 
 std::string XMLDoc::read(Node* graph)
-{
-	return read_helper(graph, 0);
-}
+{ return read_helper(graph, 0); }
 
 std::vector<std::string> XMLDoc::lex(std::string text)
 {
@@ -191,25 +179,9 @@ Node* XMLDoc::graph()
 	return graph;
 }
 
-void XMLDoc::write(std::string path)
-{
-	std::ofstream file = std::ofstream(path);
-	file << text;
-	file.close();
-}
-
-std::string XMLDoc::dump()
-{
-	std::string out = text;
-	out += "\n---\n";
-	for(std::string token : tokens)
-	{ out += token + '\n'; }
-	return out;
-}
-
 XMLDoc::XMLDoc(std::string path)
 {
-	text = read(path);
+	text = Doc::read(path);
 	tokens = lex(text);
 }
 

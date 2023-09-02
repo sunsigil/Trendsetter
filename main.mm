@@ -22,6 +22,8 @@
 #include "node.h"
 #include "doc.h"
 
+#define WIDTH 1280
+#define HEIGHT 720
 namespace fsys = std::filesystem;
 
 static void glfw_error_callback(int error, const char* description)
@@ -29,7 +31,7 @@ static void glfw_error_callback(int error, const char* description)
     fprintf(stderr, "<!> [GLFW] %d: %s\n", error, description);
 }
 
-void draw_file_selector(fsys::path section, fsys::path& path)
+void draw_file_selector(fsys::path section, fsys::path& path, Node*& graph)
 {
 	static int select_idx = 0;
 
@@ -44,21 +46,56 @@ void draw_file_selector(fsys::path section, fsys::path& path)
 	{
 		for(int i = 0; i < entries.size(); i++)
 		{
-			if(ImGui::Selectable(entries[i].c_str(), i == select_idx))
-			{ select_idx = i; }
+			if(ImGui::Selectable(entries[i].c_str(), i == select_idx, ImGuiSelectableFlags_AllowDoubleClick))
+			{
+				if(ImGui::IsMouseDoubleClicked(0))
+				{
+					Doc* doc = nullptr;
+
+					if(path.extension() == ".xml")
+					{ doc = new XMLDoc(path); }
+					else if(path.extension() == ".csv")
+					{ doc = new CSVDoc(path); }
+					else
+					{ doc = new Doc(path); }
+
+					if(!doc->validate())
+					{
+						ImGui::OpenPopup("Error##invalid_doc_popup");
+						if(ImGui::BeginPopupModal("Error##invalid_doc_popup"))
+						{
+							ImGui::Text("Document's contents are invalid.");
+							ImGui::EndPopup();
+						}
+					}
+					else
+					{
+						graph = doc->graph();
+						if(graph == nullptr)
+						{ graph = new Node("root", false); }
+					}
+
+					delete doc;
+				}
+				select_idx = i;
+			}
 		}
 		ImGui::EndListBox();
 	}
-
-	path = entries[select_idx];
+	
+	if(select_idx < entries.size())
+	{ path = entries[select_idx]; }
 }
 
 void draw_file_adder(fsys::path path)
 {
 	static std::string add_name = "";
-	ImGui::InputText(path.c_str(), &add_name);
+	ImGui::PushItemWidth(WIDTH/4);
+	ImGui::InputText("##file_adder_input", &add_name);
+	ImGui::PopItemWidth();
 	fsys::path add_path = path/add_name;
 
+	ImGui::SameLine();
 	if(add_name.length() == 0)
 	{ ImGui::Text("Enter name to create new file."); }
 	else if(add_name.length() < 3)
@@ -67,7 +104,7 @@ void draw_file_adder(fsys::path path)
 	{ ImGui::Text("File name belongs to existing file."); }
 	else
 	{
-		if(ImGui::Button("Add##add_file_button"))
+		if(ImGui::Button("Add##file_adder_button"))
 		{
 			std::ofstream file = std::ofstream(add_path);
 			file.close();
@@ -77,60 +114,25 @@ void draw_file_adder(fsys::path path)
 	}
 }
 
-void draw_file_loader(fsys::path path, Node*& graph)
-{
-	if(ImGui::Button("Load##load_file_button"))
-	{
-		Doc* doc = nullptr;
-		if(path.extension() == ".xml")
-		{ doc = new XMLDoc(path); }
-		else
-		{ doc = new CSVDoc(path); }
-
-		if(!doc->validate())
-		{
-			std::cerr << "invalid" << std::endl;
-			ImGui::OpenPopup("Error##invalid_doc_popup");
-			if(ImGui::BeginPopupModal("Error##invalid_doc_popup"))
-			{
-				ImGui::Text("Document's contents are invalid.");
-				ImGui::EndPopup();
-			}
-		}
-		else
-		{
-			std::cerr << "valid" << std::endl;
-			graph = doc->graph();
-			if(graph == nullptr)
-			{ graph = new Node("root", false); }
-		}
-	}
-}
-
 void draw_driver_editor(Node* node, int level, std::vector<std::string> traits)
 {
 	if(level == 0)
 	{
-		ImGui::PushID(node);
-		if(ImGui::TreeNode(node->data.c_str()))
-		{	
-			for(int i = 0; i < node->children.size(); i++)
-			{ draw_driver_editor(node->children[i], level+1, traits); }
-			
-			if(ImGui::Button("Add Weight"))
-			{
-				Node* trait_node = new Node(traits[0], false);
-				Node* weight_node = new Node("0", true);
-				trait_node->children.push_back(weight_node);
-				node->children.push_back(trait_node);
-			}
-			ImGui::TreePop();
+		for(int i = 0; i < node->children.size(); i++)
+		{ draw_driver_editor(node->children[i], level+1, traits); }
+		
+		if(ImGui::Button("Add Weight"))
+		{
+			Node* trait_node = new Node(traits[0], false);
+			Node* weight_node = new Node("0", true);
+			trait_node->children.push_back(weight_node);
+			node->children.push_back(trait_node);
 		}
-		ImGui::PopID();
 	}
 	else
 	{
 		ImGui::PushID(node);
+		ImGui::PushItemWidth(WIDTH/6);
 		if(ImGui::BeginCombo("##driver_trait_input", node->data.c_str()))
 		{
 			for(std::string trait : traits)
@@ -142,6 +144,7 @@ void draw_driver_editor(Node* node, int level, std::vector<std::string> traits)
 		}
 		ImGui::SameLine();
 		ImGui::InputText("##driver_weight_input", &node->children.back()->data);
+		ImGui::PopItemWidth();
 		ImGui::PopID();
 	}
 }
@@ -218,7 +221,7 @@ int main(int argc, char** argv)
 
     // Construct window
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-    GLFWwindow* window = glfwCreateWindow(1280, 720, "Trendsetter", nullptr, nullptr);
+    GLFWwindow* window = glfwCreateWindow(WIDTH, HEIGHT, "Trendsetter", nullptr, nullptr);
     if (window == nullptr)
 	{ return 1; }
 
@@ -295,9 +298,8 @@ int main(int argc, char** argv)
 			// Load document if needed
 			if(graphs[section_idx] == nullptr)
 			{
-				draw_file_selector(section_path, paths[section_idx]);
+				draw_file_selector(section_path, paths[section_idx], graphs[section_idx]);
 				draw_file_adder(section_path);
-				draw_file_loader(paths[section_idx], graphs[section_idx]);
 			}
 			else
 			{ 
