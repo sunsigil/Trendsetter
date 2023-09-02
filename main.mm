@@ -1,10 +1,10 @@
-// Read online: https://github.com/ocornut/imgui/tree/master/docs
+// Read online: https://github.com/ocornut/imgui/graph/master/docs
 
 #include <stdio.h>
 #include <iostream>
 #include <filesystem>
 #include <fstream>
-#include <map>
+#include <sstream>
 
 #import <Metal/Metal.h>
 #import <QuartzCore/QuartzCore.h>
@@ -19,88 +19,28 @@
 #include "imgui_impl_metal.h"
 #include "misc/cpp/imgui_stdlib.h"
 
-#include "tree.h"
+#include "node.h"
 #include "doc.h"
 
 namespace fsys = std::filesystem;
-
-struct Asset
-{
-	std::string path;
-	Doc doc;
-	Node* tree;
-};
-
-struct Globals
-{
-	std::vector<std::string> traits;
-};
-Globals globals;
 
 static void glfw_error_callback(int error, const char* description)
 {
     fprintf(stderr, "<!> [GLFW] %d: %s\n", error, description);
 }
 
-Globals load_globals(fsys::path path)
-{
-	fsys::path traits_path = path/"traits.csv";
-	if(!fsys::exists(traits_path))
-	{
-		std::ofstream file = std::ofstream(traits_path);
-		file.close();
-	}
-
-	std::ifstream file = std::ifstream(traits_path);
-	std::stringstream traits_buffer;
-	traits_buffer << file.rdbuf();
-	std::string traits_text = traits_buffer.str();
-	file.close();
-
-	std::vector<std::string> traits = std::vector<std::string>();
-	int trait_start = 0;
-	for(int i = 0; i < traits_text.size(); i++)
-	{
-		if(traits_text[i] == ',' || traits_text[i] == '\n')
-		{
-			traits.push_back(traits_text.substr(trait_start, i));
-			trait_start = i+1;
-		}
-	}
-
-	return {traits};
-}
-
-void draw_file_adder(fsys::path path)
-{
-	static std::string add_name = "";
-	ImGui::InputText(path.c_str(), &add_name);
-	fsys::path add_path = path/add_name;
-
-	if(add_name.length() >= 3 || !fsys::exists(add_path))
-	{
-		if(ImGui::Button("Add##add_file_button"))
-		{
-			std::ofstream file = std::ofstream(add_path);
-			file.close();
-		}
-	}
-	else
-	{ ImGui::Text("Directory empty. Enter a valid file name to begin"); }
-}
-
-void draw_file_loader(fsys::path path, Asset& asset)
+void draw_file_selector(fsys::path section, fsys::path& path)
 {
 	static int select_idx = 0;
 
 	std::vector<fsys::path> entries = std::vector<fsys::path>();
-	for(fsys::path entry : fsys::directory_iterator(path))
+	for(fsys::path entry : fsys::directory_iterator(section))
 	{
 		if(fsys::is_regular_file(entry))
 		{ entries.push_back(entry); }
 	}
 
-	if(ImGui::BeginListBox(path.c_str()))
+	if(ImGui::BeginListBox(section.c_str()))
 	{
 		for(int i = 0; i < entries.size(); i++)
 		{
@@ -109,31 +49,65 @@ void draw_file_loader(fsys::path path, Asset& asset)
 		}
 		ImGui::EndListBox();
 	}
-	std::string selection = entries[select_idx];
 
-	if(ImGui::Button("Load##load_tree_button"))
+	path = entries[select_idx];
+}
+
+void draw_file_adder(fsys::path path)
+{
+	static std::string add_name = "";
+	ImGui::InputText(path.c_str(), &add_name);
+	fsys::path add_path = path/add_name;
+
+	if(add_name.length() == 0)
+	{ ImGui::Text("Enter name to create new file."); }
+	else if(add_name.length() < 3)
+	{ ImGui::Text("File name is too short."); }
+	else if(!add_path.extension().empty() && fsys::exists(add_path))
+	{ ImGui::Text("File name belongs to existing file."); }
+	else
 	{
-		Doc doc = Doc(selection);
-		if(!doc.validate())
+		if(ImGui::Button("Add##add_file_button"))
 		{
+			std::ofstream file = std::ofstream(add_path);
+			file.close();
+			add_name = "";
+			add_path = path;
+		}
+	}
+}
+
+void draw_file_loader(fsys::path path, Node*& graph)
+{
+	if(ImGui::Button("Load##load_file_button"))
+	{
+		Doc* doc = nullptr;
+		if(path.extension() == ".xml")
+		{ doc = new XMLDoc(path); }
+		else
+		{ doc = new CSVDoc(path); }
+
+		if(!doc->validate())
+		{
+			std::cerr << "invalid" << std::endl;
 			ImGui::OpenPopup("Error##invalid_doc_popup");
 			if(ImGui::BeginPopupModal("Error##invalid_doc_popup"))
 			{
-				ImGui::Text("Document does not contain valid XML");
+				ImGui::Text("Document's contents are invalid.");
 				ImGui::EndPopup();
 			}
 		}
 		else
 		{
-			Node* tree = doc.parse();
-			if(tree == nullptr)
-			{ tree = new Node("root", false); }
-			asset = {selection, doc, tree};
+			std::cerr << "valid" << std::endl;
+			graph = doc->graph();
+			if(graph == nullptr)
+			{ graph = new Node("root", false); }
 		}
 	}
 }
 
-void draw_driver_editor(Node* node, int level)
+void draw_driver_editor(Node* node, int level, std::vector<std::string> traits)
 {
 	if(level == 0)
 	{
@@ -141,11 +115,11 @@ void draw_driver_editor(Node* node, int level)
 		if(ImGui::TreeNode(node->data.c_str()))
 		{	
 			for(int i = 0; i < node->children.size(); i++)
-			{ draw_driver_editor(node->children[i], level+1); }
+			{ draw_driver_editor(node->children[i], level+1, traits); }
 			
 			if(ImGui::Button("Add Weight"))
 			{
-				Node* trait_node = new Node(globals.traits[0], false);
+				Node* trait_node = new Node(traits[0], false);
 				Node* weight_node = new Node("0", true);
 				trait_node->children.push_back(weight_node);
 				node->children.push_back(trait_node);
@@ -159,7 +133,7 @@ void draw_driver_editor(Node* node, int level)
 		ImGui::PushID(node);
 		if(ImGui::BeginCombo("##driver_trait_input", node->data.c_str()))
 		{
-			for(std::string trait : globals.traits)
+			for(std::string trait : traits)
 			{
 				if(ImGui::Selectable(trait.c_str(), trait == node->data))
 				{ node->data = trait; }
@@ -170,6 +144,22 @@ void draw_driver_editor(Node* node, int level)
 		ImGui::InputText("##driver_weight_input", &node->children.back()->data);
 		ImGui::PopID();
 	}
+}
+
+void draw_global_editor(Node* node, std::vector<std::string>& traits)
+{
+	if(node != nullptr && traits.size() == 0)
+	{
+		Node* ptr = node;
+		while(ptr != nullptr)
+		{
+			traits.push_back(ptr->data);
+			ptr = ptr->terminal ? nullptr : ptr->children.back();
+		}
+	}
+
+	for(std::string trait : traits)
+	{ ImGui::Text(trait.c_str()); }
 }
 
 int main(int argc, char** argv)
@@ -199,10 +189,10 @@ int main(int argc, char** argv)
 		}
 	}
 
-	int tab_idx = 0;
-	Asset default_asset = {"", Doc(""), nullptr}; 
-	Asset assets[] = {default_asset, default_asset, default_asset, default_asset, default_asset};
-	globals = load_globals(workspace_path/"globals");
+	int section_idx = 0;
+	fsys::path paths[] = {"", "", "", "", ""};
+	Node* graphs[] = {nullptr, nullptr, nullptr, nullptr, nullptr};
+	std::vector<std::string> traits = std::vector<std::string>();
 
     // Initialize IMGUI
     IMGUI_CHECKVERSION();
@@ -283,9 +273,9 @@ int main(int argc, char** argv)
 			// Anchor window
 			ImGui::SetNextWindowPos(ImVec2(0, 0));
 			ImGui::SetNextWindowSize(ImVec2(width, height));
-
-			// Compose test window
             ImGui::Begin(workspace_pathname.c_str(), nullptr, flags);
+
+			// Draw tab bar, identify section path and index
 			if(ImGui::BeginTabBar("Workspace Tabs", ImGuiTabBarFlags_None))
 			{
 				int idx = 0;
@@ -293,42 +283,45 @@ int main(int argc, char** argv)
 				{
 					if(ImGui::BeginTabItem(section.c_str()))
 					{
-						tab_idx = idx;
+						section_idx = idx;
 						ImGui::EndTabItem();
 					}
 					idx++;
 				}
 				ImGui::EndTabBar();
 			}
-			fsys::path section_path = workspace_path/sections[tab_idx];
+			fsys::path section_path = workspace_path/sections[section_idx];
 
-			if(assets[tab_idx].tree == nullptr)
+			// Load document if needed
+			if(graphs[section_idx] == nullptr)
 			{
-				size_t n_files = 0;
-				for(fsys::path entry : fsys::directory_iterator(section_path))
-				{
-					if(fsys::is_regular_file(entry))
-					{ n_files++; }
-				}
-
-				if(n_files > 0)
-				{ draw_file_loader(section_path, assets[tab_idx]); }
-				else
-				{ draw_file_adder(section_path); }
+				draw_file_selector(section_path, paths[section_idx]);
+				draw_file_adder(section_path);
+				draw_file_loader(paths[section_idx], graphs[section_idx]);
 			}
 			else
 			{ 
-				ImGui::Text(assets[tab_idx].path.c_str());
+				ImGui::Text(paths[section_idx].c_str());
 				ImGui::SameLine();
-				if(ImGui::Button("Save##asset_save_button"))
+				if(ImGui::Button("Save##doc_write_button"))
 				{
-					Doc doc = Doc(assets[tab_idx].tree);
-					doc.write(assets[tab_idx].path);
+					Doc* doc = nullptr;
+					if(paths[section_idx].extension() == ".xml")
+					{ doc = new XMLDoc(graphs[section_idx]); }
+					else
+					{ doc = new CSVDoc(graphs[section_idx]); }
+					doc->write(paths[section_idx]);
 				}
 				ImGui::Separator();
 
-				if(sections[tab_idx] == "drivers")
-				{ draw_driver_editor(assets[tab_idx].tree, 0); }
+				if(sections[section_idx] == "drivers")
+				{
+					draw_driver_editor(graphs[section_idx], 0, traits);
+				}
+				else if(sections[section_idx] == "globals")
+				{
+					draw_global_editor(graphs[section_idx], traits);
+				}
 			}
 			ImGui::End();
 
@@ -344,10 +337,10 @@ int main(int argc, char** argv)
         }
     }
 
-	for(Asset asset : assets)
+	for(Node* graph : graphs)
 	{
-		if(asset.tree != nullptr)
-		{ delete asset.tree; }
+		if(graph != nullptr)
+		{ delete graph; }
 	}
 
     ImGui_ImplMetal_Shutdown();
