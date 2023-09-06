@@ -31,10 +31,24 @@ static void glfw_error_callback(int error, const char* description)
     fprintf(stderr, "<!> [GLFW] %d: %s\n", error, description);
 }
 
+bool is_enum_str(std::string str)
+{
+	if(str.length() == 0)
+	{ return false; }
+	if(str[0] == '_')
+	{ return false; }
+
+	for(int i = 0; i < str.length(); i++)
+	{
+		if(str[i] != '_' && (!isalnum(str[i]) || !isupper(str[i])))
+		{ return false; }
+	}
+
+	return true;
+}
+
 void draw_file_selector(fsys::path section, fsys::path& path, Node*& graph)
 {
-	static int select_idx = 0;
-
 	std::vector<fsys::path> entries = std::vector<fsys::path>();
 	for(fsys::path entry : fsys::directory_iterator(section))
 	{
@@ -42,49 +56,59 @@ void draw_file_selector(fsys::path section, fsys::path& path, Node*& graph)
 		{ entries.push_back(entry); }
 	}
 
+	static int select_idx = 0;
+	static bool confirmed = false;
+
 	if(ImGui::BeginListBox(section.c_str()))
 	{
 		for(int i = 0; i < entries.size(); i++)
 		{
 			if(ImGui::Selectable(entries[i].c_str(), i == select_idx, ImGuiSelectableFlags_AllowDoubleClick))
 			{
-				if(ImGui::IsMouseDoubleClicked(0))
-				{
-					Doc* doc = nullptr;
-
-					if(path.extension() == ".xml")
-					{ doc = new XMLDoc(path); }
-					else if(path.extension() == ".csv")
-					{ doc = new CSVDoc(path); }
-					else
-					{ doc = new Doc(path); }
-
-					if(!doc->validate())
-					{
-						ImGui::OpenPopup("Error##invalid_doc_popup");
-						if(ImGui::BeginPopupModal("Error##invalid_doc_popup"))
-						{
-							ImGui::Text("Document's contents are invalid.");
-							ImGui::EndPopup();
-						}
-					}
-					else
-					{
-						graph = doc->graph();
-						if(graph == nullptr)
-						{ graph = new Node("root", false); }
-					}
-
-					delete doc;
-				}
 				select_idx = i;
+				if(ImGui::IsMouseDoubleClicked(0))
+				{ confirmed = true; }
 			}
 		}
 		ImGui::EndListBox();
 	}
 	
-	if(select_idx < entries.size())
-	{ path = entries[select_idx]; }
+	if(confirmed)
+	{
+		path = entries[select_idx];
+		Doc* doc = nullptr;
+		bool valid = false;
+
+		if(path.extension() == ".xml")
+		{ doc = new XMLDoc(path); }
+		else if(path.extension() == ".csv")
+		{ doc = new CSVDoc(path); }
+		else
+		{ doc = new Doc(path); }
+
+		if(doc->validate())
+		{
+			graph = doc->graph();
+			if(graph == nullptr)
+			{ graph = new Node("root", false); }
+			confirmed = false;
+		}
+		else
+		{ ImGui::OpenPopup("Error##invalid_doc_popup"); }
+
+		if(ImGui::BeginPopupModal("Error##invalid_doc_popup"))
+		{
+			ImGui::Text("Document's contents are invalid.");
+			if(ImGui::Button("Close##close_invalid_doc_popup"))
+			{
+				confirmed = false;
+				ImGui::CloseCurrentPopup();
+			}
+			ImGui::EndPopup();
+		}
+
+		delete doc;
+	}
 }
 
 void draw_file_adder(fsys::path path)
@@ -114,16 +138,16 @@ void draw_file_adder(fsys::path path)
 	}
 }
 
-void draw_driver_editor(Node* node, int level, std::vector<std::string> traits)
+void draw_driver_editor(Node* node, Node* traits, int level)
 {
 	if(level == 0)
 	{
 		for(int i = 0; i < node->children.size(); i++)
-		{ draw_driver_editor(node->children[i], level+1, traits); }
+		{ draw_driver_editor(node->children[i], traits, level+1); }
 		
 		if(ImGui::Button("Add Weight"))
 		{
-			Node* trait_node = new Node(traits[0], false);
+			Node* trait_node = new Node(traits->data, false);
 			Node* weight_node = new Node("0", true);
 			trait_node->children.push_back(weight_node);
 			node->children.push_back(trait_node);
@@ -135,10 +159,13 @@ void draw_driver_editor(Node* node, int level, std::vector<std::string> traits)
 		ImGui::PushItemWidth(WIDTH/6);
 		if(ImGui::BeginCombo("##driver_trait_input", node->data.c_str()))
 		{
-			for(std::string trait : traits)
+			Node* ptr = traits;
+			while(ptr != nullptr)
 			{
+				std::string trait = ptr->data;
 				if(ImGui::Selectable(trait.c_str(), trait == node->data))
 				{ node->data = trait; }
+				ptr = ptr->terminal ? nullptr : ptr->children.back();
 			}
 			ImGui::EndCombo();
 		}
@@ -149,20 +176,43 @@ void draw_driver_editor(Node* node, int level, std::vector<std::string> traits)
 	}
 }
 
-void draw_global_editor(Node* node, std::vector<std::string>& traits)
+void draw_global_editor(Node* node)
 {
-	if(node != nullptr && traits.size() == 0)
+	Node* ptr = node;
+	Node* last = nullptr;
+	while(ptr != nullptr)
 	{
-		Node* ptr = node;
-		while(ptr != nullptr)
-		{
-			traits.push_back(ptr->data);
-			ptr = ptr->terminal ? nullptr : ptr->children.back();
-		}
+		ImGui::PushID(ptr);
+		std::string old_data = ptr->data;
+		ImGui::InputText("##trait_name_input", &ptr->data);
+		if(!is_enum_str(ptr->data))
+		{ ptr->data = old_data; }
+		ImGui::PopID();
+
+		last = ptr;
+		ptr = ptr->terminal ? nullptr : ptr->children.back();
 	}
 
-	for(std::string trait : traits)
-	{ ImGui::Text(trait.c_str()); }
+	static std::string add_name = "";
+	ImGui::PushItemWidth(WIDTH/6);
+	ImGui::InputText("##trait_add_input", &add_name);
+	if(is_enum_str(add_name))
+	{
+		ImGui::SameLine();
+		if(ImGui::Button("Add"))
+		{
+			last->terminal = false;
+			Node* child = new Node(add_name, true);
+			last->children.push_back(child);
+			add_name = "";
+		}
+	}
+	else
+	{
+		ImGui::SameLine();
+		ImGui::Text("Trait names must be formatted LIKE_SO.");
+	}
+	ImGui::PopItemWidth();
 }
 
 int main(int argc, char** argv)
@@ -181,7 +231,7 @@ int main(int argc, char** argv)
 		return 1;
 	}
 
-	std::string sections[] = {"drivers", "items", "demographics", "packs", "globals"};
+	std::string sections[] = {"drivers", "items", "demographics", "agendas", "packs", "globals"};
 	for(std::string section : sections)
 	{
 		fsys::path section_path = workspace_path/section;
@@ -193,9 +243,8 @@ int main(int argc, char** argv)
 	}
 
 	int section_idx = 0;
-	fsys::path paths[] = {"", "", "", "", ""};
-	Node* graphs[] = {nullptr, nullptr, nullptr, nullptr, nullptr};
-	std::vector<std::string> traits = std::vector<std::string>();
+	fsys::path paths[] = {"", "", "", "", "", ""};
+	Node* graphs[] = {nullptr, nullptr, nullptr, nullptr, nullptr, nullptr};
 
     // Initialize IMGUI
     IMGUI_CHECKVERSION();
@@ -314,15 +363,55 @@ int main(int argc, char** argv)
 					{ doc = new CSVDoc(graphs[section_idx]); }
 					doc->write(paths[section_idx]);
 				}
+				ImGui::SameLine();
+				bool close = false;
+				if(ImGui::Button("Close##doc_close_button"))
+				{ close = true; }
 				ImGui::Separator();
-
-				if(sections[section_idx] == "drivers")
+				
+				if(close)
+				{ ImGui::OpenPopup("Save?##doc_save_popup"); }
+				else
 				{
-					draw_driver_editor(graphs[section_idx], 0, traits);
+					if(sections[section_idx] == "drivers")
+					{
+						draw_driver_editor(graphs[section_idx], graphs[5], 0);
+					}
+					else if(sections[section_idx] == "globals")
+					{
+						draw_global_editor(graphs[section_idx]);
+					}
 				}
-				else if(sections[section_idx] == "globals")
+
+				if(ImGui::BeginPopupModal("Save?##doc_save_popup"))
 				{
-					draw_global_editor(graphs[section_idx], traits);
+					ImGui::Text("Save document before closing?");
+					if(ImGui::Button("Save##doc_write_button"))
+					{
+						Doc* doc = nullptr;
+						if(paths[section_idx].extension() == ".xml")
+						{ doc = new XMLDoc(graphs[section_idx]); }
+						else if(paths[section_idx].extension() == ".csv")
+						{ doc = new CSVDoc(graphs[section_idx]); }
+						else
+						{ doc = new Doc(graphs[section_idx]); }
+						doc->write(paths[section_idx]);
+
+						paths[section_idx] = "";
+						graphs[section_idx] = nullptr;
+						ImGui::CloseCurrentPopup();
+					}
+					ImGui::SameLine();
+					if(ImGui::Button("Don't Save##doc_nowrite_button"))
+					{
+						paths[section_idx] = "";
+						graphs[section_idx] = nullptr;
+						ImGui::CloseCurrentPopup();
+					}
+					ImGui::SameLine();
+					if(ImGui::Button("Cancel##close_doc_save_popup"))
+					{ ImGui::CloseCurrentPopup(); }
+					ImGui::EndPopup();
 				}
 			}
 			ImGui::End();
