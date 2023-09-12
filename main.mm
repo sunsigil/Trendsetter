@@ -31,20 +31,120 @@ static void glfw_error_callback(int error, const char* description)
     fprintf(stderr, "<!> [GLFW] %d: %s\n", error, description);
 }
 
-bool is_enum_str(std::string str)
-{
-	if(str.length() == 0)
-	{ return false; }
-	if(str[0] == '_')
-	{ return false; }
+void eprint(std::string msg)
+{ std::cerr << msg << std::endl; }
 
-	for(int i = 0; i < str.length(); i++)
+void add_field(Node* node, std::string field_name)
+{
+	Node* field_node = new Node(field_name, false);
+	Node* value_node = new Node("0", true);
+	field_node->children.push_back(value_node);
+	node->children.push_back(field_node);
+}
+
+void add_stub(Node* node, std::string stub_name)
+{
+	Node* stub_node = new Node(stub_name, false);
+	node->children.push_back(stub_node);
+}
+
+void del_child(Node* parent, int idx)
+{
+	delete parent->children[idx];
+	parent->children.erase(parent->children.begin() + idx);
+}
+
+void enforce_field(Node* node, std::string field_name)
+{
+	for(Node* child : node->children)
 	{
-		if(str[i] != '_' && (!isalnum(str[i]) || !isupper(str[i])))
-		{ return false; }
+		if(!child->terminal && child->data == field_name)
+		{ return; }
 	}
 
-	return true;
+	add_field(node, field_name);
+}
+
+void enforce_stub(Node* node, std::string stub_name)
+{
+	for(Node* child : node->children)
+	{
+		if(!child->terminal && child->data == stub_name)
+		{ return; }
+	}
+
+	add_stub(node, stub_name);
+}
+
+void draw_text_field(Node* node, std::string label)
+{
+	ImGui::PushID(node);
+	ImGui::InputText(label.c_str(), &node->children.back()->data);
+	ImGui::PopID();
+}
+
+void draw_text_block_field(Node* node, std::string label)
+{
+	ImGui::PushID(node);
+	ImGui::InputTextMultiline
+	(
+		label.c_str(),
+		&node->children.back()->data,
+		ImVec2(0,0),
+		ImGuiInputTextFlags_CtrlEnterForNewLine,
+		nullptr,
+		nullptr
+	);
+	ImGui::PopID();
+}
+
+void draw_float_field(Node* node, float min, float max, std::string label)
+{
+	ImGui::PushID(node);
+	float value = std::stof(node->children.back()->data);
+	ImGui::SliderFloat(label.c_str(), &value, min, max);
+	node->children.back()->data = std::to_string(value);
+	ImGui::PopID();
+}
+
+void draw_combo_field(Node* node, Node* options, std::string label)
+{
+	ImGui::PushID(node);
+	if(ImGui::BeginCombo(label.c_str(), node->data.c_str()))
+	{
+		Node* ptr = options;
+		while(ptr != nullptr)
+		{
+			std::string option = ptr->data;
+			if(ImGui::Selectable(option.c_str(), option == node->data))
+			{ node->data = option; }
+			ptr = ptr->terminal ? nullptr : ptr->children.back();
+		}
+		ImGui::EndCombo();
+	}
+	ImGui::PopID();
+}
+
+void draw_asset_field(Node* node, fsys::path dir, std::string ext, std::string label)
+{
+	ImGui::PushID(node);
+	std::vector<fsys::path> entries = std::vector<fsys::path>();
+	for(fsys::path entry : fsys::directory_iterator(dir))
+	{
+		if(fsys::is_regular_file(entry) && entry.extension() == ext)
+		{ entries.push_back(entry); }
+	}
+
+	if(ImGui::BeginCombo(label.c_str(), node->children.back()->data.c_str()))
+	{
+		for(fsys::path entry : entries)
+		{
+			if(ImGui::Selectable(entry.filename().c_str(), entry.filename() == node->data))
+			{ node->children.back()->data = entry.filename(); }
+		}
+		ImGui::EndCombo();
+	}
+	ImGui::PopID();
 }
 
 void draw_file_selector(fsys::path section, fsys::path& path, Node*& graph)
@@ -52,7 +152,7 @@ void draw_file_selector(fsys::path section, fsys::path& path, Node*& graph)
 	std::vector<fsys::path> entries = std::vector<fsys::path>();
 	for(fsys::path entry : fsys::directory_iterator(section))
 	{
-		if(fsys::is_regular_file(entry))
+		if(fsys::is_regular_file(entry) && entry.extension() != ".meta")
 		{ entries.push_back(entry); }
 	}
 
@@ -124,7 +224,9 @@ void draw_file_adder(fsys::path path)
 	{ ImGui::Text("Enter name to create new file."); }
 	else if(add_name.length() < 3)
 	{ ImGui::Text("File name is too short."); }
-	else if(!add_path.extension().empty() && fsys::exists(add_path))
+	else if(add_path.extension() != ".xml" && add_path.extension() != ".csv")
+	{ ImGui::Text("File must be in XML or CSV format."); }
+	else if(fsys::exists(add_path))
 	{ ImGui::Text("File name belongs to existing file."); }
 	else
 	{
@@ -138,81 +240,275 @@ void draw_file_adder(fsys::path path)
 	}
 }
 
-void draw_driver_editor(Node* node, Node* traits, int level)
+void draw_driver_editor(Node* node, Node* traits, fsys::path workspace_path)
 {
-	if(level == 0)
+	if(node->data == "root")
 	{
-		for(int i = 0; i < node->children.size(); i++)
-		{ draw_driver_editor(node->children[i], traits, level+1); }
-		
-		if(ImGui::Button("Add Weight"))
+		if(node->children.size() == 0)
 		{
-			Node* trait_node = new Node(traits->data, false);
-			Node* weight_node = new Node("0", true);
-			trait_node->children.push_back(weight_node);
-			node->children.push_back(trait_node);
+			add_field(node, "name");
+			add_field(node, "icon");
+			add_field(node, "description");
+			add_field(node, "hint");
+			add_stub(node, "weights");
 		}
+		for(Node* child : node->children)
+		{ draw_driver_editor(child, traits, workspace_path); }
+	}
+	else if(node->data == "icon")
+	{
+		ImGui::PushItemWidth(WIDTH/6);
+		draw_asset_field(node, workspace_path/"icons", ".png", "icon");
+		ImGui::PopItemWidth();
+	}
+	else if(node->data == "description")
+	{
+		ImGui::PushItemWidth(WIDTH/3);
+		draw_text_block_field(node, node->data);
+		ImGui::PopItemWidth();
+	}
+	else if(node->data == "hint")
+	{
+		ImGui::PushItemWidth(WIDTH/3);
+		draw_text_field(node, node->data);
+		ImGui::PopItemWidth();
+	}
+	else if(node->data == "weights")
+	{
+		ImGui::SeparatorText("Weights");
+		ImGui::PushID(node);
+
+		int child_idx = 0;
+		for(Node* child : node->children)
+		{
+			ImGui::PushID(child);
+			ImGui::PushItemWidth(WIDTH/6);
+			draw_combo_field(child, traits, "##trait");
+			ImGui::SameLine();
+			draw_float_field(child, -1, 1, "##weight");
+			ImGui::SameLine();
+			if(ImGui::Button("Delete"))
+			{ del_child(node, child_idx); }
+			ImGui::PopItemWidth();
+			ImGui::PopID();
+
+			child_idx++;
+		}
+
+		if(ImGui::Button("Add Weight"))
+		{ add_field(node, traits->data); }
+		ImGui::PopID();
 	}
 	else
 	{
-		ImGui::PushID(node);
 		ImGui::PushItemWidth(WIDTH/6);
-		if(ImGui::BeginCombo("##driver_trait_input", node->data.c_str()))
-		{
-			Node* ptr = traits;
-			while(ptr != nullptr)
-			{
-				std::string trait = ptr->data;
-				if(ImGui::Selectable(trait.c_str(), trait == node->data))
-				{ node->data = trait; }
-				ptr = ptr->terminal ? nullptr : ptr->children.back();
-			}
-			ImGui::EndCombo();
-		}
-		ImGui::SameLine();
-		ImGui::InputText("##driver_weight_input", &node->children.back()->data);
+		draw_text_field(node, node->data);
 		ImGui::PopItemWidth();
+	}
+}
+
+void draw_item_editor(Node* node, Node* traits, fsys::path workspace_path)
+{
+	if(node->data == "root")
+	{
+		if(node->children.size() == 0)
+		{
+			add_field(node, "name");
+			add_field(node, "icon");
+			add_stub(node, "traits");
+		}
+		for(Node* child : node->children)
+		{ draw_item_editor(child, traits, workspace_path); }
+	}
+	else if(node->data == "icon")
+	{
+		ImGui::PushItemWidth(WIDTH/6);
+		draw_asset_field(node, workspace_path/"icons", ".png", "icon");
+		ImGui::PopItemWidth();
+	}
+	else if(node->data == "traits")
+	{
+		ImGui::PushID(node);
+		ImGui::Text(node->data.c_str());
+		ImGui::Separator();
+
+		int child_idx = 0;
+		for(Node* child : node->children)
+		{
+			ImGui::PushID(child);
+			ImGui::PushItemWidth(WIDTH/6);
+			draw_combo_field(child, traits, "##trait");
+			ImGui::SameLine();
+			if(ImGui::Button("Delete"))
+			{ del_child(node, child_idx); }
+			ImGui::PopItemWidth();
+			ImGui::PopID();
+
+			child_idx++;
+		}
+
+		if(ImGui::Button("Add Trait"))
+		{ add_stub(node, traits->data); }
 		ImGui::PopID();
+	}
+	else
+	{
+		ImGui::PushItemWidth(WIDTH/6);
+		draw_text_field(node, node->data);
+		ImGui::PopItemWidth();
+	}
+}
+
+void draw_demographic_editor(Node* node, Node* traits)
+{
+	if(node->data == "root")
+	{
+		if(node->children.size() == 0)
+		{
+			add_field(node, "name");
+			add_stub(node, "likes");
+			add_stub(node, "dislikes");
+		}
+		for(Node* child : node->children)
+		{ draw_demographic_editor(child, traits); }
+	}
+	else if(node->data == "likes" || node->data == "dislikes")
+	{	
+		ImGui::PushID(node);
+		ImGui::Text(node->data.c_str());
+		ImGui::Separator();
+
+		int child_idx = 0;
+		for(Node* child : node->children)
+		{
+			ImGui::PushID(child);
+			ImGui::PushItemWidth(WIDTH/6);
+			draw_combo_field(child, traits, "##trait");
+			ImGui::SameLine();
+			if(ImGui::Button("Delete"))
+			{ del_child(node, child_idx); }
+			ImGui::PopItemWidth();
+			ImGui::PopID();
+
+			child_idx++;
+		}
+
+		if(ImGui::Button("Add Trait"))
+		{ add_stub(node, traits->data); }
+		ImGui::PopID();
+	}
+	else
+	{
+		ImGui::PushItemWidth(WIDTH/6);
+		draw_text_field(node, node->data);
+		ImGui::PopItemWidth();
+	}
+}
+
+void draw_agenda_editor(Node* node, fsys::path workspace_path)
+{
+	if(node->data == "root")
+	{
+		if(node->children.size() == 0)
+		{
+			add_field(node, "demographic");
+			add_stub(node, "drivers");
+		}
+		enforce_stub(node, "dialogue");
+
+		for(Node* child : node->children)
+		{ draw_agenda_editor(child, workspace_path); }
+	}
+	else if(node->data == "dialogue")
+	{
+		ImGui::SeparatorText("Dialogue");
+		ImGui::PushID(node);
+		for(Node* child : node->children)
+		{ draw_text_field(child, child->data); }
+		if(ImGui::Button("Add Dialogue"))
+		{ add_field(node, "dialogue"); }
+		ImGui::PopID();
+
+	}
+	else if(node->data == "drivers")
+	{	
+		ImGui::SeparatorText("Drivers");
+		ImGui::PushID(node);
+		ImGui::Text(node->data.c_str());
+		ImGui::Separator();
+
+		int child_idx = 0;
+		for(Node* child : node->children)
+		{
+			ImGui::PushID(child);
+			ImGui::PushItemWidth(WIDTH/6);
+			draw_asset_field(child, workspace_path/"drivers", ".xml", "##driver");
+			ImGui::SameLine();
+			if(ImGui::Button("Delete"))
+			{ del_child(node, child_idx); }
+			ImGui::PopItemWidth();
+			ImGui::PopID();
+
+			child_idx++;
+		}
+
+		if(ImGui::Button("Add Driver"))
+		{ add_field(node, "driver"); }
+		ImGui::PopID();
+	}
+	else
+	{
+		ImGui::PushItemWidth(WIDTH/6);
+		draw_asset_field(node, workspace_path/"demographics", ".xml", node->data);
+		ImGui::PopItemWidth();
 	}
 }
 
 void draw_global_editor(Node* node)
 {
-	Node* ptr = node;
-	Node* last = nullptr;
-	while(ptr != nullptr)
-	{
-		ImGui::PushID(ptr);
-		std::string old_data = ptr->data;
-		ImGui::InputText("##trait_name_input", &ptr->data);
-		if(!is_enum_str(ptr->data))
-		{ ptr->data = old_data; }
-		ImGui::PopID();
-
-		last = ptr;
-		ptr = ptr->terminal ? nullptr : ptr->children.back();
-	}
-
 	static std::string add_name = "";
+	
+	ImGui::PushID(node);
 	ImGui::PushItemWidth(WIDTH/6);
-	ImGui::InputText("##trait_add_input", &add_name);
-	if(is_enum_str(add_name))
+	ImGui::InputText
+	(
+		"##trait_rename_input", &node->data,
+		ImGuiInputTextFlags_CharsUppercase | ImGuiInputTextFlags_CharsNoBlank
+	);
+	ImGui::PopItemWidth();
+	ImGui::PopID();
+	
+	if(node->terminal)
 	{
+		ImGui::PushItemWidth(WIDTH/6);
+		ImGui::InputText
+		(
+			"##trait_add_input", &add_name,
+			ImGuiInputTextFlags_CharsUppercase | ImGuiInputTextFlags_CharsNoBlank
+		);	
 		ImGui::SameLine();
-		if(ImGui::Button("Add"))
+		if(ImGui::Button("Add") && add_name.size() > 0)
 		{
-			last->terminal = false;
+			node->terminal = false;
 			Node* child = new Node(add_name, true);
-			last->children.push_back(child);
+			node->children.push_back(child);
 			add_name = "";
 		}
+		ImGui::PopItemWidth();
 	}
 	else
+	{ draw_global_editor(node->children.back()); }
+}
+
+void draw_icon_list(fsys::path path)
+{
+	for(fsys::path entry : fsys::directory_iterator(path))
 	{
-		ImGui::SameLine();
-		ImGui::Text("Trait names must be formatted LIKE_SO.");
+		if(fsys::is_regular_file(entry) && entry.extension() == ".png")
+		{
+			ImGui::Text(entry.c_str());
+		}
 	}
-	ImGui::PopItemWidth();
 }
 
 int main(int argc, char** argv)
@@ -231,7 +527,7 @@ int main(int argc, char** argv)
 		return 1;
 	}
 
-	std::string sections[] = {"drivers", "items", "demographics", "agendas", "packs", "globals"};
+	std::string sections[] = {"drivers", "items", "demographics", "agendas", "packs", "globals", "icons"};
 	for(std::string section : sections)
 	{
 		fsys::path section_path = workspace_path/section;
@@ -243,8 +539,8 @@ int main(int argc, char** argv)
 	}
 
 	int section_idx = 0;
-	fsys::path paths[] = {"", "", "", "", "", ""};
-	Node* graphs[] = {nullptr, nullptr, nullptr, nullptr, nullptr, nullptr};
+	fsys::path paths[] = {"", "", "", "", "", "", ""};
+	Node* graphs[] = {nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr};
 
     // Initialize IMGUI
     IMGUI_CHECKVERSION();
@@ -324,21 +620,32 @@ int main(int argc, char** argv)
             
 			// Anchor window
 			ImGui::SetNextWindowPos(ImVec2(0, 0));
-			ImGui::SetNextWindowSize(ImVec2(width, height));
+			ImGui::SetNextWindowSize(ImVec2(WIDTH, HEIGHT));
             ImGui::Begin(workspace_pathname.c_str(), nullptr, flags);
 
 			// Draw tab bar, identify section path and index
 			if(ImGui::BeginTabBar("Workspace Tabs", ImGuiTabBarFlags_None))
 			{
-				int idx = 0;
-				for(std::string section : sections)
+				if(graphs[5] == nullptr)
 				{
-					if(ImGui::BeginTabItem(section.c_str()))
+					if(ImGui::BeginTabItem("globals"))
 					{
-						section_idx = idx;
+						section_idx = 5;
 						ImGui::EndTabItem();
 					}
-					idx++;
+				}
+				else
+				{
+					int idx = 0;
+					for(std::string section : sections)
+					{
+						if(ImGui::BeginTabItem(section.c_str()))
+						{
+							section_idx = idx;
+							ImGui::EndTabItem();
+						}
+						idx++;
+					}
 				}
 				ImGui::EndTabBar();
 			}
@@ -375,11 +682,27 @@ int main(int argc, char** argv)
 				{
 					if(sections[section_idx] == "drivers")
 					{
-						draw_driver_editor(graphs[section_idx], graphs[5], 0);
+						draw_driver_editor(graphs[section_idx], graphs[5], workspace_path);
+					}
+					else if(sections[section_idx] == "items")
+					{
+						draw_item_editor(graphs[section_idx], graphs[5], workspace_path);	
+					}
+					else if(sections[section_idx] == "demographics")
+					{
+						draw_demographic_editor(graphs[section_idx], graphs[5]);
+					}
+					else if(sections[section_idx] == "agendas")
+					{
+						draw_agenda_editor(graphs[section_idx], workspace_path);
 					}
 					else if(sections[section_idx] == "globals")
 					{
 						draw_global_editor(graphs[section_idx]);
+					}
+					else if(sections[section_idx] == "icons")
+					{
+						draw_icon_list(workspace_path/"icons");
 					}
 				}
 

@@ -15,7 +15,7 @@ std::string CSVDoc::read(Node* graph)
 		read(graph->children.back());
 	}
 	else
-	{ return graph->data; }
+	{ return graph->data + '\n'; }
 }
 
 std::vector<std::string> CSVDoc::lex(std::string text)
@@ -25,7 +25,7 @@ std::vector<std::string> CSVDoc::lex(std::string text)
 	int start = 0;
 	for(int i = 0; i < text.size(); i++)
 	{
-		if(text[i] == ',' || text[i] == '\n')
+		if(text[i] == ',' || i == text.size()-1)
 		{
 			tokens.push_back(text.substr(start, i-start));
 			start = i+1;

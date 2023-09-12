@@ -66,6 +66,8 @@ std::string read_helper(Node* node, int level)
 		{ text += '\t'; }
 		text += "</" + node->data + ">\n";
 	}
+	else if(clean_token(node->data).size() == 0)
+	{ text += "0\n"; }
 	else
 	{ text += node->data + "\n"; }
 
