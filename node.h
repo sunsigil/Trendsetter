@@ -6,34 +6,18 @@
 class Node
 {
 	private:
-		void delete_re()
-		{
-			for(int i = 0; i < children.size(); i++)
-			{ delete children[i]; }
-		}
+		void delete_re();
 
 	public:
+		std::string name;
 		std::string data;
-		bool terminal;
 		std::vector<Node*> children;
 
-		bool is_terminated()
-		{
-			for(int i = 0; i < children.size(); i++)
-			{
-				if(children[i]->terminal)
-				{ return true; }
-			}
-			return false;
-		}
-
-		Node(std::string data, bool terminal)
-		{
-			this->data = data;
-			this->terminal = terminal;
-			children = std::vector<Node*>();
-		}
-
-		~Node()
-		{ delete_re(); }
+		Node(std::string name, std::string data);
+		~Node();
 };
+
+Node* node_lookup(Node* node, std::string name);
+std::vector<std::string> node_flatten(Node* node);
+void node_populate(Node* node, std::vector<std::string>& items);
+void node_print(Node* node);

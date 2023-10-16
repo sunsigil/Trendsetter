@@ -1,3 +1,5 @@
+#pragma once
+
 #include <string>
 #include <vector>
 #include "node.h"
@@ -35,18 +37,5 @@ class XMLDoc : public Doc
 
 		XMLDoc(std::string path);
 		XMLDoc(Node* graph);
-};
-
-class CSVDoc : public Doc
-{
-	protected:
-		virtual std::string read(Node* graph);
-		virtual std::vector<std::string> lex(std::string text);
-
-	public:
-		virtual Node* graph();
-
-		CSVDoc(std::string path);
-		CSVDoc(Node* graph);
 };
 

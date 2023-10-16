@@ -52,25 +52,25 @@ std::string read_tag(std::string text, int i)
 std::string read_helper(Node* node, int level)
 {
 	std::string text = "";
+
 	for(int i = 0; i < level; i++)
-	{ text += '\t'; }
+	{ text += "\t"; }
+	text += "<" + node->name + ">\n";
 
-	if(!node->terminal)
+	if(!node->data.empty())
 	{
-		text += "<" + node->data + ">\n";
-
-		for(int i = 0; i < node->children.size(); i++)
-		{ text += read_helper(node->children[i], level+1); }
-		
-		for(int i = 0; i < level; i++)
-		{ text += '\t'; }
-		text += "</" + node->data + ">\n";
+		for(int i = 0; i <= level; i++)
+		{ text += "\t"; }
+		text += node->data + "\n";
 	}
-	else if(clean_token(node->data).size() == 0)
-	{ text += "0\n"; }
-	else
-	{ text += node->data + "\n"; }
-
+	
+	for(int i = 0; i < node->children.size(); i++)
+	{ text += read_helper(node->children[i], level+1); }
+	
+	for(int i = 0; i < level; i++)
+	{ text += "\t"; }
+	text += "</" + node->name + ">\n";
+	
 	return text;
 }
 
@@ -152,28 +152,29 @@ Node* XMLDoc::graph()
 	{
 		std::string prefix = tokens[i].substr(0,2);
 		std::string payload = tokens[i].substr(2);
-		Node* node;
+		Node* node = nullptr;
 
 		switch(prefix[0])
 		{
 			case 't':
 				if(payload[0] == '/')
 				{
-					graph = tree.back();
+					Node* node = tree.back();
 					tree.pop_back();
+					if(tree.empty())
+					{ break; }
+					graph = tree.back();
+					graph->children.push_back(node);
 				}
 				else
 				{
-					node = new Node(payload, false);
-					if(tree.size() > 0)
-					{ tree.back()->children.push_back(node); }
+					node = new Node(payload, "");
 					tree.push_back(node);
 				}
 			break;
 
 			case 'c':
-				node = new Node(payload, true);
-				tree.back()->children.push_back(node);
+				tree.back()->data = payload;
 			break;
 		}
 	}

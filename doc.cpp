@@ -30,7 +30,7 @@ bool Doc::validate()
 
 Node* Doc::graph()
 {
-	return new Node(text, true);
+	return new Node("root", text);
 }
 
 void Doc::write(std::string path)
