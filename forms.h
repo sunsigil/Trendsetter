@@ -68,7 +68,7 @@ void draw_file_adder(fsys::path path)
 
 	ImGui::SameLine();
 	if(add_name.length() == 0)
-	{ ImGui::Text("Enter name to create new file!"); }
+	{ ImGui::Text("Enter name to create new file."); }
 	else if(add_path.extension() != ".xml")
 	{ ImGui::Text("File must be of type .XML!"); }
 	else if(fsys::exists(add_path))
@@ -124,4 +124,12 @@ void draw_file_selector(fsys::path dir, fsys::path& path_result, Node*& graph_re
 			ImGui::EndPopup();
 		}
 	}
+}
+
+void draw_image(image_t& image)
+{
+	ImGui::PushID(image.path.c_str());
+	ImGui::Image((ImTextureID) image.tex_id, ImVec2(image.width, image.height));
+	ImGui::PopID();
+
 }

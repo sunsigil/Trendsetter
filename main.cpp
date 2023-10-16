@@ -3,22 +3,22 @@
 #include <filesystem>
 #include <fstream>
 #include <sstream>
-
-#import <Metal/Metal.h>
-#import <QuartzCore/QuartzCore.h>
+#include <map>
 
 #define GLFW_INCLUDE_NONE
 #define GLFW_EXPOSE_NATIVE_COCOA
+#include <GL/glew.h> 
 #include <GLFW/glfw3.h>
 #include <GLFW/glfw3native.h>
 
 #include "imgui.h"
 #include "imgui_impl_glfw.h"
-#include "imgui_impl_metal.h"
+#include "imgui_impl_opengl3.h"
 #include "misc/cpp/imgui_stdlib.h"
 
 #include "node.h"
 #include "doc.h"
+#include "image.h"
 #include "fields.h"
 #include "forms.h"
 
@@ -93,7 +93,7 @@ void draw_driver_editor(Node* node, Node* traits, fsys::path workspace_path)
 	}
 }
 
-void draw_item_editor(Node* node, Node* globals, fsys::path workspace_path)
+void draw_item_editor(Node* node, Node* globals, std::map<std::string, image_t>& icon_table, fsys::path workspace_path)
 {
 	Node* types_node = node_lookup(globals, "types");
 	std::vector<std::string> types = node_flatten(types_node);
@@ -110,11 +110,16 @@ void draw_item_editor(Node* node, Node* globals, fsys::path workspace_path)
 			add_field(node, "traits", "");
 		}
 		for(Node* child : node->children)
-		{ draw_item_editor(child, globals, workspace_path); }
+		{ draw_item_editor(child, globals, icon_table, workspace_path); }
 	}
 	else if(node->name == "icon")
 	{
 		draw_asset_field(node, workspace_path/"icons", ".png", "icon");
+		if(icon_table.find(node->data) != icon_table.end())
+		{
+			ImGui::SameLine();
+			draw_image(icon_table[node->data]);
+		}
 	}
 	else if(node->name == "type")
 	{
@@ -234,10 +239,67 @@ int main(int argc, char** argv)
 		eprint("usage: "+std::string(argv[0])+" <WORKSPACE PATH>");
 		return 1;
 	}
-	std::string workspace_pathname = argv[1];
-	eprint("validated argument count");
 
-	fsys::path workspace_path = fsys::path(workspace_pathname);
+    // Initialize GLFW
+    glfwSetErrorCallback(glfw_error_callback);
+    if (!glfwInit())
+    {
+		eprint("error: failed to initialize GLFW!");
+		return 1;
+	}
+	eprint("initialized GLFW");
+
+    // Construct window
+	glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
+	glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 2);
+	glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+	glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
+    GLFWwindow* window = glfwCreateWindow(WIDTH, HEIGHT, "Trendsetter", nullptr, nullptr);
+    if (window == nullptr)
+	{ return 1; }
+  	glfwMakeContextCurrent(window);
+	eprint("initialized GLFW window");
+  	
+	// Initialize GLEW
+	glewExperimental = GL_TRUE;
+  	if(glewInit() != GLEW_OK)
+	{
+		eprint("error: failed to initialize GLEW!");
+		return 1;
+	}
+	eprint("initialized GLEW");
+
+	// Initialize IMGUI
+    IMGUI_CHECKVERSION();
+    ImGui::CreateContext();
+    ImGuiIO& io = ImGui::GetIO(); (void) io;
+	eprint("initialized IMGUI");
+    
+	// Initialize IMGUI backends
+	ImGui_ImplGlfw_InitForOpenGL(window, true);
+	ImGui_ImplOpenGL3_Init("#version 150");
+	eprint("initialized IMGUI backends");
+
+	// Configure IMGUI
+    ImGui::StyleColorsDark();
+    io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+	const ImGuiWindowFlags flags =
+	ImGuiWindowFlags_NoSavedSettings |
+	ImGuiWindowFlags_NoMove |
+	ImGuiWindowFlags_NoResize |
+	ImGuiWindowFlags_NoSavedSettings |
+	ImGuiWindowFlags_NoCollapse |
+	ImGuiWindowFlags_NoTitleBar |
+	ImGuiWindowFlags_NoBackground;
+	eprint("configured IMGUI");
+  	
+	const GLubyte* renderer = glGetString(GL_RENDERER);
+  	const GLubyte* version = glGetString(GL_VERSION);
+  	std::cout << "Renderer: " << renderer << std::endl;
+  	std::cout << "OpenGL version: " << version << std::endl;
+	
+	// Setup workspace
+	fsys::path workspace_path = fsys::path(argv[1]);
 	if(!fsys::exists(workspace_path) || !fsys::is_directory(workspace_path))
 	{
 		eprint("error: workspace path does not point to existing directory");
@@ -257,6 +319,16 @@ int main(int argc, char** argv)
 	}
 	eprint("validated workspace directory structure");
 
+	std::map<std::string, image_t> icon_table;
+	for(fsys::path icon_path : fsys::directory_iterator(workspace_path/"icons"))
+	{
+		if(fsys::is_regular_file(icon_path) && icon_path.extension() == ".png")
+		{
+			image_t icon;
+			load_png(icon_path, icon);
+			icon_table[icon_path.filename()] = icon;
+		}
+	}
 	std::vector<fsys::path> paths = std::vector<fsys::path>();
 	std::vector<Node*> graphs = std::vector<Node*>();
 	for(int i = 0; i < sections.size(); i++)
@@ -266,193 +338,117 @@ int main(int argc, char** argv)
 	}
 	int section_idx = 0;
 	eprint("initialized workspace constructs");
-
-    // Initialize GLFW
-    glfwSetErrorCallback(glfw_error_callback);
-    if (!glfwInit())
-    { return 1; }
-	eprint("initialized GLFW");
-
-    // Construct window
-    glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-    GLFWwindow* window = glfwCreateWindow(WIDTH, HEIGHT, "Trendsetter", nullptr, nullptr);
-    if (window == nullptr)
-	{ return 1; }
-	eprint("initialized GLFW window");
-
-	// Initialize Metal
-    id <MTLDevice> device = MTLCreateSystemDefaultDevice();
-    id <MTLCommandQueue> commandQueue = [device newCommandQueue];
-	eprint("initialized Metal");
-
-	// Configure Metal
-    NSWindow *nswin = glfwGetCocoaWindow(window);
-    CAMetalLayer *layer = [CAMetalLayer layer];
-    layer.device = device;
-    layer.pixelFormat = MTLPixelFormatBGRA8Unorm;
-    nswin.contentView.layer = layer;
-    nswin.contentView.wantsLayer = YES;
-    MTLRenderPassDescriptor *renderPassDescriptor = [MTLRenderPassDescriptor new];
-	eprint("configured metal");
-    
-	// Initialize IMGUI
-    IMGUI_CHECKVERSION();
-    ImGui::CreateContext();
-    ImGuiIO& io = ImGui::GetIO(); (void) io;
-	eprint("initialized IMGUI");
-    
-	// Initialize IMGUI backends
-    ImGui_ImplGlfw_InitForOpenGL(window, true);
-    ImGui_ImplMetal_Init(device);
-	eprint("initialized IMGUI backends");
-
-	// Configure IMGUI
-    ImGui::StyleColorsDark();
-    //ImGui::StyleColorsLight();
-    io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
-    // io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;
-	const ImGuiWindowFlags flags =
-	ImGuiWindowFlags_NoMove |
-	ImGuiWindowFlags_NoResize |
-	ImGuiWindowFlags_NoSavedSettings |
-	ImGuiWindowFlags_NoCollapse |
-	ImGuiWindowFlags_NoTitleBar;
-	eprint("configured IMGUI");
 	
     // Main loop
     while (!glfwWindowShouldClose(window))
     {
-        @autoreleasepool
-        {
-            // Poll and handle events (inputs, window resize, etc.)
-            // You can read the io.WantCaptureMouse, io.WantCaptureKeyboard flags to tell if dear imgui wants to use your inputs.
-            // - When io.WantCaptureMouse is true, do not dispatch mouse input data to your main application, or clear/overwrite your copy of the mouse data.
-            // - When io.WantCaptureKeyboard is true, do not dispatch keyboard input data to your main application, or clear/overwrite your copy of the keyboard data.
-            // Generally you may always pass all inputs to dear imgui, and hide them from your application based on those two flags.
-            glfwPollEvents();
+		glfwPollEvents();
+		glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+		glClear(GL_COLOR_BUFFER_BIT);
+		ImGui_ImplGlfw_NewFrame();
+		ImGui_ImplOpenGL3_NewFrame();
+		ImGui::NewFrame();
+		
+		// Anchor window
+		ImGui::SetNextWindowPos(ImVec2(0, 0));
+		ImGui::SetNextWindowSize(ImVec2(WIDTH, HEIGHT));
+		ImGui::Begin(workspace_path.c_str(), nullptr, flags);
 
-            int width, height;
-            glfwGetFramebufferSize(window, &width, &height);
-            layer.drawableSize = CGSizeMake(width, height);
-            id<CAMetalDrawable> drawable = [layer nextDrawable];
-
-            id<MTLCommandBuffer> commandBuffer = [commandQueue commandBuffer];
-            renderPassDescriptor.colorAttachments[0].clearColor = MTLClearColorMake(0.0, 0.0, 0.0, 1.0);
-            renderPassDescriptor.colorAttachments[0].texture = drawable.texture;
-            renderPassDescriptor.colorAttachments[0].loadAction = MTLLoadActionClear;
-            renderPassDescriptor.colorAttachments[0].storeAction = MTLStoreActionStore;
-            id <MTLRenderCommandEncoder> renderEncoder = [commandBuffer renderCommandEncoderWithDescriptor:renderPassDescriptor];
-            [renderEncoder pushDebugGroup:@"Trendsetter"];
-
-            // Start the Dear ImGui frame
-            ImGui_ImplMetal_NewFrame(renderPassDescriptor);
-            ImGui_ImplGlfw_NewFrame();
-            ImGui::NewFrame();
-            
-			// Anchor window
-			ImGui::SetNextWindowPos(ImVec2(0, 0));
-			ImGui::SetNextWindowSize(ImVec2(WIDTH, HEIGHT));
-            ImGui::Begin(workspace_pathname.c_str(), nullptr, flags);
-
-			// Draw tab bar, identify section path and index
-			if(graphs.back() == nullptr)
-			{ section_idx = graphs.size()-1; }
-			else
+		// Draw tab bar, identify section path and index
+		if(graphs.back() == nullptr)
+		{
+			ImGui::Text("A global file must be loaded before the workspace can be modified.");
+			section_idx = graphs.size()-1;
+		}
+		else
+		{
+			if(ImGui::BeginTabBar("Workspace Tabs", ImGuiTabBarFlags_None))
 			{
-				if(ImGui::BeginTabBar("Workspace Tabs", ImGuiTabBarFlags_None))
+				for(int i = 0; i < sections.size(); i++)
 				{
-					for(int i = 0; i < sections.size(); i++)
+					if(ImGui::BeginTabItem(sections[i].c_str()))
 					{
-						if(ImGui::BeginTabItem(sections[i].c_str()))
-						{
-							section_idx = i;
-							ImGui::EndTabItem();
-						}
+						section_idx = i;
+						ImGui::EndTabItem();
 					}
-					ImGui::EndTabBar();
 				}
+				ImGui::EndTabBar();
 			}
-			fsys::path section_path = workspace_path/sections[section_idx];
+		}
+		fsys::path section_path = workspace_path/sections[section_idx];
 
-			// Load document if needed
-			if(graphs[section_idx] == nullptr)
+		// Load document if needed
+		if(graphs[section_idx] == nullptr)
+		{
+			draw_file_selector(section_path, paths[section_idx], graphs[section_idx]);
+			draw_file_adder(section_path);
+		}
+		else
+		{ 
+			ImGui::Text(paths[section_idx].c_str());
+			ImGui::SameLine();
+			if(ImGui::Button("Save##doc_write_button"))
 			{
-				draw_file_selector(section_path, paths[section_idx], graphs[section_idx]);
-				draw_file_adder(section_path);
+				XMLDoc doc = XMLDoc(graphs[section_idx]);
+				doc.write(paths[section_idx]);
 			}
-			else
-			{ 
-				ImGui::Text(paths[section_idx].c_str());
-				ImGui::SameLine();
+			ImGui::SameLine();
+			bool close = false;
+			if(ImGui::Button("Close##doc_close_button"))
+			{ close = true; }
+			if(close)
+			{ ImGui::OpenPopup("Save?##doc_save_popup"); }
+			
+			ImGui::Separator();
+
+			if(sections[section_idx] == "drivers")
+			{
+				draw_driver_editor(graphs[section_idx], graphs.back(), workspace_path);
+			}
+			else if(sections[section_idx] == "items")
+			{
+				draw_item_editor(graphs[section_idx], graphs.back(), icon_table, workspace_path);	
+			}
+			else if(sections[section_idx] == "demographics")
+			{
+				draw_demographic_editor(graphs[section_idx], graphs.back());
+			}
+			else if(sections[section_idx] == "globals")
+			{
+				draw_global_editor(graphs[section_idx]);
+			}
+			
+			if(ImGui::BeginPopupModal("Save?##doc_save_popup"))
+			{
+				ImGui::Text("Save document before closing?");
 				if(ImGui::Button("Save##doc_write_button"))
 				{
 					XMLDoc doc = XMLDoc(graphs[section_idx]);
 					doc.write(paths[section_idx]);
+					graphs[section_idx] = nullptr;
+					paths[section_idx] = "";
+					ImGui::CloseCurrentPopup();
 				}
 				ImGui::SameLine();
-				bool close = false;
-				if(ImGui::Button("Close##doc_close_button"))
-				{ close = true; }
-				if(close)
-				{ ImGui::OpenPopup("Save?##doc_save_popup"); }
-				
-				ImGui::Separator();
-
-				if(sections[section_idx] == "drivers")
+				if(ImGui::Button("Don't Save##doc_nowrite_button"))
 				{
-					draw_driver_editor(graphs[section_idx], graphs.back(), workspace_path);
+					paths[section_idx] = "";
+					graphs[section_idx] = nullptr;
+					ImGui::CloseCurrentPopup();
 				}
-				else if(sections[section_idx] == "items")
+				ImGui::SameLine();
+				if(ImGui::Button("Cancel##close_doc_save_popup"))
 				{
-					draw_item_editor(graphs[section_idx], graphs.back(), workspace_path);	
+					ImGui::CloseCurrentPopup();
 				}
-				else if(sections[section_idx] == "demographics")
-				{
-					draw_demographic_editor(graphs[section_idx], graphs.back());
-				}
-				else if(sections[section_idx] == "globals")
-				{
-					draw_global_editor(graphs[section_idx]);
-				}
-				
-				if(ImGui::BeginPopupModal("Save?##doc_save_popup"))
-				{
-					ImGui::Text("Save document before closing?");
-					if(ImGui::Button("Save##doc_write_button"))
-					{
-						XMLDoc doc = XMLDoc(graphs[section_idx]);
-						doc.write(paths[section_idx]);
-						graphs[section_idx] = nullptr;
-						paths[section_idx] = "";
-						ImGui::CloseCurrentPopup();
-					}
-					ImGui::SameLine();
-					if(ImGui::Button("Don't Save##doc_nowrite_button"))
-					{
-						paths[section_idx] = "";
-						graphs[section_idx] = nullptr;
-						ImGui::CloseCurrentPopup();
-					}
-					ImGui::SameLine();
-					if(ImGui::Button("Cancel##close_doc_save_popup"))
-					{
-						ImGui::CloseCurrentPopup();
-					}
-					ImGui::EndPopup();
-				}
+				ImGui::EndPopup();
 			}
-			ImGui::End();
+		}
 
-            // Render
-            ImGui::Render();
-            ImGui_ImplMetal_RenderDrawData(ImGui::GetDrawData(), commandBuffer, renderEncoder);
-
-            [renderEncoder popDebugGroup];
-            [renderEncoder endEncoding];
-
-            [commandBuffer presentDrawable:drawable];
-            [commandBuffer commit];
-        }
+		ImGui::End();
+		ImGui::Render();
+		ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+		glfwSwapBuffers(window);
     }
 
 	for(Node* graph : graphs)
@@ -462,7 +458,7 @@ int main(int argc, char** argv)
 	}
 	eprint("deleted graphs");
 
-    ImGui_ImplMetal_Shutdown();
+    ImGui_ImplOpenGL3_Shutdown();
     ImGui_ImplGlfw_Shutdown();
     ImGui::DestroyContext();
 	eprint("shut down IMGUI");
