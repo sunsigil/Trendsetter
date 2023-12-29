@@ -131,5 +131,4 @@ void draw_image(image_t& image)
 	ImGui::PushID(image.path.c_str());
 	ImGui::Image((ImTextureID) image.tex_id, ImVec2(image.width, image.height));
 	ImGui::PopID();
-
 }

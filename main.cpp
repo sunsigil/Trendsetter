@@ -40,8 +40,13 @@ void eprintv(std::vector<std::string> msgs)
 	{ std::cerr << msgs[i] << std::endl; }
 }
 
-void draw_driver_editor(Node* node, Node* traits, fsys::path workspace_path)
+void draw_driver_editor(Node* node, Node* globals, fsys::path workspace_path)
 {
+	Node* types_node = node_lookup(globals, "types");
+	std::vector<std::string> types = node_flatten(types_node);
+	Node* traits_node = node_lookup(globals, "traits");
+	std::vector<std::string> traits = node_flatten(traits_node);
+
 	if(node->name == "root")
 	{
 		if(node->children.size() == 0)
@@ -53,7 +58,7 @@ void draw_driver_editor(Node* node, Node* traits, fsys::path workspace_path)
 			add_field(node, "weights", "");
 		}
 		for(Node* child : node->children)
-		{ draw_driver_editor(child, traits, workspace_path); }
+		{ draw_driver_editor(child, globals, workspace_path); }
 	}
 	else if(node->name == "icon")
 	{
@@ -61,35 +66,44 @@ void draw_driver_editor(Node* node, Node* traits, fsys::path workspace_path)
 	}
 	else if(node->name == "description")
 	{
-		draw_block_field(node, node->data);
+		draw_block_field(node, node->name);
 	}
 	else if(node->name == "hint")
 	{
-		draw_text_field(node, node->data);
+		draw_text_field(node, node->name);
 	}
 	else if(node->name == "weights")
 	{
 		ImGui::SeparatorText("Weights");
 		ImGui::PushID(node);
 
+		ImGui::PushItemWidth(WIDTH/5);
 		for(Node* child : node->children)
 		{
-			draw_combo_field_str(child->name, node_flatten(traits), "##key");
+			ImGui::PushID(child);
+			Node* key = child->children[0];
+			Node* value = child->children[1];
+			draw_combo_field(key, traits, "key");
 			ImGui::SameLine();
-			draw_int_field_str(child->data, -3, 3, "##value");
+			draw_int_field(value, -3, 3, "value");
 			ImGui::SameLine();
 			if(ImGui::Button("Delete"))
 			{ del_field(node, child); }
 			ImGui::PopID();
 		}
+		ImGui::PopItemWidth();
 
 		if(ImGui::Button("Add Weight"))
-		{ add_field(node, traits->data, "0"); }
+		{
+			Node* pair = add_field(node, "weight", "");
+			add_field(pair, "key", "NONE");
+			add_field(pair, "value", "0");
+		}
 		ImGui::PopID();
 	}
 	else
 	{
-		draw_text_field(node, node->data);
+		draw_text_field(node, node->name);
 	}
 }
 
@@ -114,12 +128,12 @@ void draw_item_editor(Node* node, Node* globals, std::map<std::string, image_t>&
 	}
 	else if(node->name == "icon")
 	{
-		draw_asset_field(node, workspace_path/"icons", ".png", "icon");
 		if(icon_table.find(node->data) != icon_table.end())
 		{
-			ImGui::SameLine();
 			draw_image(icon_table[node->data]);
+			ImGui::SameLine();
 		}
+		draw_asset_field(node, workspace_path/"icons", ".png", "icon");
 	}
 	else if(node->name == "type")
 	{
@@ -153,8 +167,6 @@ void draw_item_editor(Node* node, Node* globals, std::map<std::string, image_t>&
 
 void draw_demographic_editor(Node* node, Node* globals)
 {
-	node_print(globals);
-
 	Node* traits_node = node_lookup(globals, "traits");
 	std::vector<std::string> traits = node_flatten(traits_node);
 
@@ -382,6 +394,37 @@ int main(int argc, char** argv)
 		{
 			draw_file_selector(section_path, paths[section_idx], graphs[section_idx]);
 			draw_file_adder(section_path);
+
+			if(sections[section_idx] == "items")
+			{
+				ImGui::Text("Unused Icons");
+				ImGui::Separator();
+				for(fsys::path icon_path : fsys::directory_iterator(workspace_path/"icons"))
+				{
+					if(!fsys::is_regular_file(icon_path) || icon_path.extension() != ".png")
+					{ continue; }
+
+					bool used = false;
+					for(fsys::path item_path : fsys::directory_iterator(workspace_path/"items"))
+					{
+						if(!fsys::is_regular_file(item_path) || item_path.extension() != ".xml")
+						{ continue; }
+						if(item_path.filename().replace_extension(".png") == icon_path.filename())
+						{ used = true; break; }
+					}
+
+					if(!used)
+					{
+						ImGui::PushID(icon_path.c_str());
+						if(ImGui::Button(icon_path.c_str()))
+						{
+							std::ofstream item_file(workspace_path/"items"/icon_path.filename().replace_extension(".xml"));
+							item_file.close();
+						}
+						ImGui::PopID();
+					}
+				}
+			}
 		}
 		else
 		{ 
@@ -402,21 +445,13 @@ int main(int argc, char** argv)
 			ImGui::Separator();
 
 			if(sections[section_idx] == "drivers")
-			{
-				draw_driver_editor(graphs[section_idx], graphs.back(), workspace_path);
-			}
+			{ draw_driver_editor(graphs[section_idx], graphs.back(), workspace_path); }
 			else if(sections[section_idx] == "items")
-			{
-				draw_item_editor(graphs[section_idx], graphs.back(), icon_table, workspace_path);	
-			}
+			{ draw_item_editor(graphs[section_idx], graphs.back(), icon_table, workspace_path); }
 			else if(sections[section_idx] == "demographics")
-			{
-				draw_demographic_editor(graphs[section_idx], graphs.back());
-			}
+			{ draw_demographic_editor(graphs[section_idx], graphs.back()); }
 			else if(sections[section_idx] == "globals")
-			{
-				draw_global_editor(graphs[section_idx]);
-			}
+			{ draw_global_editor(graphs[section_idx]); }
 			
 			if(ImGui::BeginPopupModal("Save?##doc_save_popup"))
 			{
@@ -438,9 +473,7 @@ int main(int argc, char** argv)
 				}
 				ImGui::SameLine();
 				if(ImGui::Button("Cancel##close_doc_save_popup"))
-				{
-					ImGui::CloseCurrentPopup();
-				}
+				{ ImGui::CloseCurrentPopup(); }
 				ImGui::EndPopup();
 			}
 		}
