@@ -94,6 +94,7 @@ void draw_asset_field(Node* node, fsys::path dir, std::string ext, std::string l
 		if(fsys::is_regular_file(entry) && entry.extension() == ext)
 		{ entries.push_back(entry); }
 	}
+	std::sort(entries.begin(), entries.end());
 
 	if(ImGui::BeginCombo(label.c_str(), node->data.c_str()))
 	{

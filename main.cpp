@@ -394,37 +394,6 @@ int main(int argc, char** argv)
 		{
 			draw_file_selector(section_path, paths[section_idx], graphs[section_idx]);
 			draw_file_adder(section_path);
-
-			if(sections[section_idx] == "items")
-			{
-				ImGui::Text("Unused Icons");
-				ImGui::Separator();
-				for(fsys::path icon_path : fsys::directory_iterator(workspace_path/"icons"))
-				{
-					if(!fsys::is_regular_file(icon_path) || icon_path.extension() != ".png")
-					{ continue; }
-
-					bool used = false;
-					for(fsys::path item_path : fsys::directory_iterator(workspace_path/"items"))
-					{
-						if(!fsys::is_regular_file(item_path) || item_path.extension() != ".xml")
-						{ continue; }
-						if(item_path.filename().replace_extension(".png") == icon_path.filename())
-						{ used = true; break; }
-					}
-
-					if(!used)
-					{
-						ImGui::PushID(icon_path.c_str());
-						if(ImGui::Button(icon_path.c_str()))
-						{
-							std::ofstream item_file(workspace_path/"items"/icon_path.filename().replace_extension(".xml"));
-							item_file.close();
-						}
-						ImGui::PopID();
-					}
-				}
-			}
 		}
 		else
 		{ 

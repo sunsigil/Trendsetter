@@ -95,6 +95,7 @@ void draw_file_selector(fsys::path dir, fsys::path& path_result, Node*& graph_re
 		if(fsys::is_regular_file(candidate) && candidate.extension() == ".xml")
 		{ entries.push_back(candidate); }
 	}
+	std::sort(entries.begin(), entries.end());
 
 	draw_list_select_form(entries, selection, dir);
 	
